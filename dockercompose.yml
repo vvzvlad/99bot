@@ -1,0 +1,19 @@
+volumes:
+  99bot_ng:
+services:
+  99bot_ng:
+    image: ghcr.io/vvzvlad/99bot_ng:latest
+    container_name: 99bot_ng
+    restart: unless-stopped
+    volumes:
+      - 99bot_ng:/app/data
+    environment:
+      TZ: Europe/Moscow
+      BOT_TOKEN: 7080520207:ffff
+    logging:
+      driver: "json-file"
+      options:
+        max-file: 5
+        max-size: 10m
+    labels:
+      com.centurylinklabs.watchtower.enable: true
