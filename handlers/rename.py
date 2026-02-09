@@ -41,10 +41,9 @@ async def handle_rename(client: Client, message: Message):
             await message.delete()
             return
         
-        # Validate title length (Telegram limit is 255 characters)
+        # Truncate title if it's longer than 255 characters (Telegram limit)
         if len(new_title) > 255:
-            await message.delete()
-            return
+            new_title = new_title[:255]
         
         # Delete the command message
         await message.delete()
