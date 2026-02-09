@@ -2,5 +2,6 @@
 # -*- coding: utf-8 -*-
 
 from .chat_manager import ChatManager
+from .title_monitor import TitleMonitor
 
-__all__ = ['ChatManager']
+__all__ = ['ChatManager', 'TitleMonitor']

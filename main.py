@@ -14,9 +14,11 @@ load_dotenv()
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 from pyrogram import filters
+from pyrogram.enums import MessageServiceType
 from telegram_client import TelegramClient
 from config import get_settings, setup_logging
 from handlers import handle_rename, handle_repic
+from services.title_monitor import TitleMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,9 @@ async def main():
     shutdown_event = asyncio.Event()
     tg_client = TelegramClient()
     
+    # Initialize title monitor
+    title_monitor = TitleMonitor(data_dir=settings.get("session_path", "data"))
+    
     try:
         # Start Telegram client
         await tg_client.start()
@@ -55,10 +60,17 @@ async def main():
         async def repic_wrapper(client, message):
             await handle_repic(client, message)
         
+        # Register title change monitor (service message for new chat title)
+        @tg_client.client.on_message(filters.service & filters.group)
+        async def title_monitor_wrapper(client, message):
+            if message.service == MessageServiceType.NEW_CHAT_TITLE:
+                await title_monitor.handle_title_change(client, message)
+        
         logger.info("Bot started successfully. Listening for commands...")
         logger.info("Available commands:")
         logger.info("  /rename - Rename chat")
         logger.info("  /repic - Set chat photo")
+        logger.info("Monitoring: Chat title changes -> data/chat_title_changes.csv")
         
         # Wait for shutdown signal
         await shutdown_event.wait()
