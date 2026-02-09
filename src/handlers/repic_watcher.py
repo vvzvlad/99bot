@@ -87,12 +87,13 @@ async def handle_repic(client: Client, message: Message):
         await message.delete()
 
         # Download photo to temp directory
-        temp_dir = "temp"
+        # Use absolute path to ensure files are saved correctly regardless of module location
+        temp_dir = os.path.join(os.getcwd(), "temp")
         
         # DEBUG: Log current working directory and temp path resolution
         current_dir = os.getcwd()
         logger.info(f"[REPIC DEBUG] Current working directory: {current_dir}")
-        logger.info(f"[REPIC DEBUG] Temp directory path (relative): {temp_dir}")
+        logger.info(f"[REPIC DEBUG] Temp directory path (relative): temp")
         logger.info(f"[REPIC DEBUG] Temp directory path (absolute): {os.path.abspath(temp_dir)}")
         
         os.makedirs(temp_dir, exist_ok=True)
