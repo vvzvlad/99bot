@@ -16,7 +16,12 @@ logger = logging.getLogger(__name__)
 
 async def handle_service_message(client: Client, message: Message):
     try:
+        logger.info(f"[SERVICE DEBUG] Service message received in chat {message.chat.id}")
+        logger.info(f"[SERVICE DEBUG] Message is service: {message.service}")
+        logger.info(f"[SERVICE DEBUG] Service type: {message.service if message.service else 'None'}")
+        
         if not message.service:
+            logger.info(f"[SERVICE DEBUG] Not a service message, skipping")
             return
 
         if message.service in [
@@ -24,10 +29,13 @@ async def handle_service_message(client: Client, message: Message):
             MessageServiceType.NEW_CHAT_PHOTO,
         ]:
             service_type = "title" if message.service == MessageServiceType.NEW_CHAT_TITLE else "photo"
+            logger.info(f"[SERVICE DEBUG] Attempting to delete {service_type} service message")
             await message.delete()
             logger.info(
                 f"Deleted service message about {service_type} change in chat {message.chat.id}"
             )
+        else:
+            logger.info(f"[SERVICE DEBUG] Service type {message.service} not handled")
 
     except Exception as e:
         logger.error(f"Error deleting service message: {str(e)}", exc_info=True)
