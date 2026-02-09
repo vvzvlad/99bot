@@ -78,5 +78,6 @@ def register_handler(client: Client, group: int = 0):
     @client.on_message(filters.command("rename") & filters.group, group=group)
     async def rename_wrapper(client: Client, message: Message):
         await handle_rename(client, message)
+        await message.continue_propagation()
 
     logger.info("Rename watcher handler registered")

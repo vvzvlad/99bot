@@ -98,5 +98,6 @@ def register_handler(client: Client, group: int = 0):
     @client.on_message(filters.command("repic") & filters.group, group=group)
     async def repic_wrapper(client: Client, message: Message):
         await handle_repic(client, message)
+        await message.continue_propagation()
 
     logger.info("Repic watcher handler registered")
