@@ -72,10 +72,10 @@ async def handle_rename(client: Client, message: Message):
         logger.error(f"Error in rename handler: {str(e)}", exc_info=True)
 
 
-def register_handler(client: Client):
+def register_handler(client: Client, group: int = 0):
     """Регистрация обработчика команды /rename"""
 
-    @client.on_message(filters.command("rename") & filters.group)
+    @client.on_message(filters.command("rename") & filters.group, group=group)
     async def rename_wrapper(client: Client, message: Message):
         await handle_rename(client, message)
 

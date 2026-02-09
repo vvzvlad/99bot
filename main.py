@@ -43,10 +43,12 @@ async def main():
         await tg_client.start()
         
         # Register command handlers
-        rename_watcher.register_handler(tg_client.client)
-        repic_watcher.register_handler(tg_client.client)
-        service_cleaner.register_handler(tg_client.client)
-        title_monitor.register_handler(tg_client.client)
+        title_monitor.register_handler(tg_client.client, group=0)
+
+        rename_watcher.register_handler(tg_client.client, group=0)
+        repic_watcher.register_handler(tg_client.client, group=0)
+        
+        service_cleaner.register_handler(tg_client.client, group=1)
         
         # Wait for shutdown signal
         await shutdown_event.wait()

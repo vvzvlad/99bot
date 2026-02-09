@@ -93,9 +93,9 @@ async def handle_repic(client: Client, message: Message):
                 logger.warning(f"Failed to remove temp file {temp_photo_path}: {str(e)}")
 
 
-def register_handler(client: Client):
+def register_handler(client: Client, group: int = 0):
     """Регистрация обработчика команды /repic"""
-    @client.on_message(filters.command("repic") & filters.group)
+    @client.on_message(filters.command("repic") & filters.group, group=group)
     async def repic_wrapper(client: Client, message: Message):
         await handle_repic(client, message)
 

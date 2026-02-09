@@ -41,14 +41,14 @@ async def handle_service_message(client: Client, message: Message):
         logger.error(f"Error deleting service message: {str(e)}", exc_info=True)
 
 
-def register_handler(client: Client):
+def register_handler(client: Client, group: int = 1):
     """
     Регистрирует обработчик служебных сообщений
 
     Args:
         client: Pyrogram client instance
     """
-    @client.on_message(filters.service & filters.group)
+    @client.on_message(filters.service & filters.group, group=group)
     async def service_cleaner_handler(client: Client, message: Message):
         await handle_service_message(client, message)
 
