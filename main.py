@@ -13,13 +13,12 @@ load_dotenv()
 # Set uvloop as event loop policy
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-from pyrogram import filters
-from pyrogram.enums import MessageServiceType
 from telegram_client import TelegramClient
 from config import get_settings, setup_logging
-from handlers import handle_rename, handle_repic
-from services.title_monitor import TitleMonitor, set_title_monitor
-from services.service_cleaner import ServiceMessageCleaner, set_service_cleaner
+from handlers import rename_watcher
+from handlers import repic_watcher
+from handlers import title_monitor
+from handlers import service_cleaner
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +27,6 @@ settings = get_settings()
 
 # Shutdown flag - будет создан в main()
 shutdown_event = None
-
-# Global client reference - будет создан в main()
-tg_client = None
 
 async def main():
     """Main bot function"""
@@ -45,37 +41,17 @@ async def main():
     shutdown_event = asyncio.Event()
     tg_client = TelegramClient()
     
-    # Initialize title monitor and set as global instance
-    title_monitor = TitleMonitor(data_dir=settings.get("session_path", "data"))
-    set_title_monitor(title_monitor)
-
-    # Service message cleaner
-    service_cleaner = ServiceMessageCleaner()
-    set_service_cleaner(service_cleaner)
-    logger.info("Service message cleaner initialized")
-    
     try:
         # Start Telegram client
         await tg_client.start()
         
-        # Register command handlers using decorators
-        @tg_client.client.on_message(filters.command("rename") & filters.group)
-        async def rename_wrapper(client, message):
-            await handle_rename(client, message)
-        
-        @tg_client.client.on_message(filters.command("repic") & filters.group)
-        async def repic_wrapper(client, message):
-            await handle_repic(client, message)
+        # Register command handlers
+        rename_watcher.register_handler(tg_client.client)
+        repic_watcher.register_handler(tg_client.client)
+        service_cleaner.register_handler(tg_client.client)
         
         # Register title change monitor (service message for new chat title)
-        @tg_client.client.on_message(filters.service & filters.group)
-        async def service_message_handler(client, message):
-            # Log title changes BEFORE deletion
-            if message.service == MessageServiceType.NEW_CHAT_TITLE:
-                await title_monitor.handle_title_change(client, message)
-            
-            # Then delete service messages about title/photo changes
-            await service_cleaner.handle_service_message(client, message)
+        title_monitor.register_handler(tg_client.client)
         # Wait for shutdown signal
         await shutdown_event.wait()
         

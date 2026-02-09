@@ -5,7 +5,7 @@ import logging
 import csv
 import os
 from datetime import datetime
-from pyrogram import Client
+from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import MessageServiceType
 
@@ -121,3 +121,23 @@ class TitleMonitor:
                 writer.writerow([timestamp, new_title, changed_by_username])
         except Exception as e:
             logger.error(f"Failed to write to CSV: {str(e)}", exc_info=True)
+
+
+def register_handler(client: Client):
+    """Регистрация обработчика мониторинга изменений названия чата"""
+    from config import load_config
+
+    if get_title_monitor() is None:
+        settings = load_config()
+        monitor = TitleMonitor(data_dir=settings.get("session_path", "data"))
+        set_title_monitor(monitor)
+        logger.info("Title monitor initialized")
+
+    @client.on_message(filters.service & filters.group)
+    async def title_monitor_wrapper(client: Client, message: Message):
+        if message.service == MessageServiceType.NEW_CHAT_TITLE:
+            title_monitor = get_title_monitor()
+            if title_monitor:
+                await title_monitor.handle_title_change(client, message)
+
+    logger.info("Title monitor handler registered")
