@@ -88,17 +88,42 @@ async def handle_repic(client: Client, message: Message):
 
         # Download photo to temp directory
         temp_dir = "temp"
+        
+        # DEBUG: Log current working directory and temp path resolution
+        current_dir = os.getcwd()
+        logger.info(f"[REPIC DEBUG] Current working directory: {current_dir}")
+        logger.info(f"[REPIC DEBUG] Temp directory path (relative): {temp_dir}")
+        logger.info(f"[REPIC DEBUG] Temp directory path (absolute): {os.path.abspath(temp_dir)}")
+        
         os.makedirs(temp_dir, exist_ok=True)
+        
+        # DEBUG: Verify temp directory was created
+        logger.info(f"[REPIC DEBUG] Temp directory exists: {os.path.exists(temp_dir)}")
+        logger.info(f"[REPIC DEBUG] Temp directory is dir: {os.path.isdir(temp_dir)}")
 
         # Generate unique filename
         temp_photo_path = os.path.join(temp_dir, f"chat_photo_{message.chat.id}_{message.id}.jpg")
         
         logger.info(f"[REPIC DEBUG] Downloading media to: {temp_photo_path}")
+        logger.info(f"[REPIC DEBUG] Download path (absolute): {os.path.abspath(temp_photo_path)}")
 
         # Download the photo
-        await client.download_media(media_to_download.file_id, file_name=temp_photo_path)
+        download_result = await client.download_media(media_to_download.file_id, file_name=temp_photo_path)
         
         logger.info(f"[REPIC DEBUG] Media downloaded successfully")
+        logger.info(f"[REPIC DEBUG] Download result path: {download_result}")
+        logger.info(f"[REPIC DEBUG] Expected path: {temp_photo_path}")
+        logger.info(f"[REPIC DEBUG] Expected path exists: {os.path.exists(temp_photo_path)}")
+        if download_result:
+            logger.info(f"[REPIC DEBUG] Download result exists: {os.path.exists(download_result)}")
+            logger.info(f"[REPIC DEBUG] Download result absolute: {os.path.abspath(download_result)}")
+        
+        # DEBUG: List files in temp directory
+        try:
+            temp_files = os.listdir(temp_dir)
+            logger.info(f"[REPIC DEBUG] Files in temp directory: {temp_files}")
+        except Exception as e:
+            logger.error(f"[REPIC DEBUG] Failed to list temp directory: {e}")
 
         if not os.path.exists(temp_photo_path):
             logger.error(f"Photo file not found: {temp_photo_path}")
