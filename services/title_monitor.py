@@ -11,6 +11,18 @@ from pyrogram.enums import MessageServiceType
 
 logger = logging.getLogger(__name__)
 
+# Global instance
+_instance = None
+
+def get_title_monitor():
+    """Get the global TitleMonitor instance"""
+    return _instance
+
+def set_title_monitor(monitor):
+    """Set the global TitleMonitor instance"""
+    global _instance
+    _instance = monitor
+
 
 class TitleMonitor:
     """Monitor for tracking chat title changes and saving them to CSV"""
@@ -82,6 +94,24 @@ class TitleMonitor:
             
         except Exception as e:
             logger.error(f"Error handling title change: {str(e)}", exc_info=True)
+    
+    async def log_title_change(self, new_title: str, changed_by_username: str):
+        """
+        Directly log a title change (used by chat_manager when service message is deleted)
+        
+        Args:
+            new_title: New chat title
+            changed_by_username: Username of who changed the title
+        """
+        try:
+            timestamp = datetime.utcnow().isoformat()
+            self._write_to_csv(timestamp, new_title, changed_by_username)
+            logger.info(
+                f"Title change logged directly: new_title='{new_title}', "
+                f"changed_by=@{changed_by_username if changed_by_username else 'unknown'}"
+            )
+        except Exception as e:
+            logger.error(f"Error logging title change: {str(e)}", exc_info=True)
     
     def _write_to_csv(self, timestamp: str, new_title: str, changed_by_username: str):
         """Write a title change record to the CSV file"""

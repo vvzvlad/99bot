@@ -18,7 +18,7 @@ from pyrogram.enums import MessageServiceType
 from telegram_client import TelegramClient
 from config import get_settings, setup_logging
 from handlers import handle_rename, handle_repic
-from services.title_monitor import TitleMonitor
+from services.title_monitor import TitleMonitor, set_title_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +44,9 @@ async def main():
     shutdown_event = asyncio.Event()
     tg_client = TelegramClient()
     
-    # Initialize title monitor
+    # Initialize title monitor and set as global instance
     title_monitor = TitleMonitor(data_dir=settings.get("session_path", "data"))
+    set_title_monitor(title_monitor)
     
     try:
         # Start Telegram client

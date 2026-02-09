@@ -5,6 +5,7 @@ import logging
 import os
 from pyrogram import Client
 from pyrogram.types import Message
+from .title_monitor import get_title_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,14 @@ class ChatManager:
             # Rename chat
             await self.client.set_chat_title(chat_id, new_title)
             logger.info(f"Chat {chat_id} renamed to: {new_title}")
+            
+            # Log to title monitor before deleting service message
+            title_monitor = get_title_monitor()
+            if title_monitor:
+                # Get bot's username for logging
+                bot_me = await self.client.get_me()
+                bot_username = bot_me.username or bot_me.first_name or "bot"
+                await title_monitor.log_title_change(new_title, bot_username)
             
             # Delete service message about title change
             async for msg in self.client.get_chat_history(chat_id, limit=10):
