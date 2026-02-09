@@ -51,5 +51,6 @@ def register_handler(client: Client, group: int = 1):
     @client.on_message(filters.service & filters.group, group=group)
     async def service_cleaner_handler(client: Client, message: Message):
         await handle_service_message(client, message)
+        await message.continue_propagation()
 
     logger.info("Service message cleaner handler registered")
