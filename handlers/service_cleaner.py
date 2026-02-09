@@ -15,18 +15,10 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_service_message(client: Client, message: Message):
-    """
-    Автоматически удаляет служебные сообщения о title/photo
-
-    Args:
-        client: Pyrogram client
-        message: Service message
-    """
     try:
         if not message.service:
             return
 
-        # Удаляем служебные сообщения о переименовании и смене фото
         if message.service in [
             MessageServiceType.NEW_CHAT_TITLE,
             MessageServiceType.NEW_CHAT_PHOTO,
