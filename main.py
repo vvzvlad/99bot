@@ -19,6 +19,7 @@ from telegram_client import TelegramClient
 from config import get_settings, setup_logging
 from handlers import handle_rename, handle_repic
 from services.title_monitor import TitleMonitor, set_title_monitor
+from services.service_cleaner import ServiceMessageCleaner, set_service_cleaner
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,11 @@ async def main():
     # Initialize title monitor and set as global instance
     title_monitor = TitleMonitor(data_dir=settings.get("session_path", "data"))
     set_title_monitor(title_monitor)
+
+    # Service message cleaner
+    service_cleaner = ServiceMessageCleaner()
+    set_service_cleaner(service_cleaner)
+    logger.info("Service message cleaner initialized")
     
     try:
         # Start Telegram client
@@ -63,16 +69,13 @@ async def main():
         
         # Register title change monitor (service message for new chat title)
         @tg_client.client.on_message(filters.service & filters.group)
-        async def title_monitor_wrapper(client, message):
+        async def service_message_handler(client, message):
+            # Log title changes BEFORE deletion
             if message.service == MessageServiceType.NEW_CHAT_TITLE:
                 await title_monitor.handle_title_change(client, message)
-        
-        logger.info("Bot started successfully. Listening for commands...")
-        logger.info("Available commands:")
-        logger.info("  /rename - Rename chat")
-        logger.info("  /repic - Set chat photo")
-        logger.info("Monitoring: Chat title changes -> data/chat_title_changes.csv")
-        
+            
+            # Then delete service messages about title/photo changes
+            await service_cleaner.handle_service_message(client, message)
         # Wait for shutdown signal
         await shutdown_event.wait()
         
