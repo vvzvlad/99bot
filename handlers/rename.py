@@ -42,10 +42,11 @@ async def handle_rename(client: Client, message: Message):
         if len(new_title) > 255:
             return
         
+        # Delete the command message FIRST
+        await message.delete()
+        
         # Try to rename chat
         await chat_manager.rename_chat(message, new_title.strip())
-        # Delete the command message
-        await message.delete()
         
     except ChatAdminRequired:
         logger.error(f"Bot lacks admin rights in chat {message.chat.id}")

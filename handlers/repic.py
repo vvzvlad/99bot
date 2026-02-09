@@ -40,6 +40,9 @@ async def handle_repic(client: Client, message: Message):
         if not photo:
             return
         
+        # Delete the command message FIRST
+        await message.delete()
+        
         # Download photo to temp directory
         temp_dir = "temp"
         os.makedirs(temp_dir, exist_ok=True)
@@ -55,8 +58,6 @@ async def handle_repic(client: Client, message: Message):
         
         # Set chat photo
         await chat_manager.set_chat_photo(message, temp_photo_path)
-        # Delete the command message
-        await message.delete()
         
     except ChatAdminRequired:
         logger.error(f"Bot lacks admin rights in chat {message.chat.id}")

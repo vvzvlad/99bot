@@ -17,6 +17,7 @@ from pyrogram import filters
 from telegram_client import TelegramClient
 from config import get_settings, setup_logging
 from handlers import handle_rename, handle_repic
+from services.title_monitor import TitleMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,11 @@ async def main():
         # Start Telegram client
         await tg_client.start()
         
+        # Setup title monitor
+        title_monitor = TitleMonitor(tg_client.client)
+        title_monitor.setup_handler()
+        logger.info("Title monitor initialized")
+        
         # Register command handlers using decorators
         @tg_client.client.on_message(filters.command("rename") & filters.group)
         async def rename_wrapper(client, message):
@@ -59,6 +65,7 @@ async def main():
         logger.info("Available commands:")
         logger.info("  /rename - Rename chat")
         logger.info("  /repic - Set chat photo")
+        logger.info("Title changes monitoring: enabled")
         
         # Wait for shutdown signal
         await shutdown_event.wait()

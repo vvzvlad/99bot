@@ -28,17 +28,6 @@ class ChatManager:
             # Rename chat
             await self.client.set_chat_title(chat_id, new_title)
             logger.info(f"Chat {chat_id} renamed to: {new_title}")
-            
-            # Delete service message about title change
-            async for msg in self.client.get_chat_history(chat_id, limit=10):
-                if msg.service and hasattr(msg, 'new_chat_title'):
-                    try:
-                        await msg.delete()
-                        logger.debug(f"Deleted service message about title change in {chat_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete service message: {str(e)}")
-                    break
-            
             return True
         except Exception as e:
             logger.error(f"Failed to rename chat {message.chat.id}: {str(e)}")
@@ -64,17 +53,6 @@ class ChatManager:
             # Set chat photo
             await self.client.set_chat_photo(chat_id, photo=photo_path)
             logger.info(f"Chat {chat_id} photo updated with: {photo_path}")
-            
-            # Delete service message about photo change
-            async for msg in self.client.get_chat_history(chat_id, limit=10):
-                if msg.service and hasattr(msg, 'new_chat_photo'):
-                    try:
-                        await msg.delete()
-                        logger.debug(f"Deleted service message about photo change in {chat_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete service message: {str(e)}")
-                    break
-            
             return True
         except Exception as e:
             logger.error(f"Failed to set chat photo for {message.chat.id}: {str(e)}")
