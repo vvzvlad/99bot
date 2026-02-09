@@ -39,7 +39,7 @@ class TelegramClient:
         self.client.add_handler(DisconnectHandler(self._on_disconnect))
         logger.info("connection_handlers: connection handlers set up")
 
-    async def _on_disconnect(self, _client):
+    async def _on_disconnect(self, _client, _session):
         """Handles disconnection from Telegram servers"""
         self.disconnect_count += 1
         logger.warning(f"connection_handler: connection lost (#{self.disconnect_count})")

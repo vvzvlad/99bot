@@ -8,8 +8,10 @@ import signal
 import sys
 from dotenv import load_dotenv
 
-# Load environment variables FIRST before any imports that use them
 load_dotenv()
+
+# Set uvloop as event loop policy
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 from pyrogram import filters
 from telegram_client import TelegramClient
@@ -21,34 +23,35 @@ logger = logging.getLogger(__name__)
 # Get settings
 settings = get_settings()
 
-# Initialize Telegram client
-tg_client = TelegramClient()
+# Shutdown flag - будет создан в main()
+shutdown_event = None
 
-# Shutdown flag
-shutdown_event = asyncio.Event()
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    logger.info(f"Received signal {signum}, initiating shutdown...")
-    shutdown_event.set()
+# Global client reference - будет создан в main()
+tg_client = None
 
 async def main():
     """Main bot function"""
+    global tg_client, shutdown_event
+    
     setup_logging(settings["log_level"])
     
     logger.info("Starting Telegram Chat Manager Bot")
     logger.info(f"Using uvloop for async operations")
+    
+    # Create shutdown event and client AFTER event loop is running
+    shutdown_event = asyncio.Event()
+    tg_client = TelegramClient()
     
     try:
         # Start Telegram client
         await tg_client.start()
         
         # Register command handlers using decorators
-        @tg_client.client.on_message(filters.command("rename") & (filters.group | filters.supergroup))
+        @tg_client.client.on_message(filters.command("rename") & filters.group)
         async def rename_wrapper(client, message):
             await handle_rename(client, message)
         
-        @tg_client.client.on_message(filters.command("repic") & (filters.group | filters.supergroup))
+        @tg_client.client.on_message(filters.command("repic") & filters.group)
         async def repic_wrapper(client, message):
             await handle_repic(client, message)
         
@@ -71,13 +74,9 @@ async def main():
         logger.info("Bot stopped")
 
 if __name__ == "__main__":
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Run the bot with uvloop
+    # Run the bot
     try:
-        asyncio.run(main(), loop_factory=uvloop.new_event_loop)
+        asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:

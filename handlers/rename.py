@@ -28,38 +28,29 @@ async def handle_rename(client: Client, message: Message):
             if message.reply_to_message.text:
                 new_title = message.reply_to_message.text
             else:
-                await message.reply_text("❌ Сообщение, на которое вы ответили, не содержит текста")
                 return
         # Check if there's text after command
         elif message.text and len(message.text.split(maxsplit=1)) > 1:
             new_title = message.text.split(maxsplit=1)[1]
         else:
-            await message.reply_text(
-                "❌ Использование:\n"
-                "• `/rename <новое название>` - переименовать чат\n"
-                "• `/rename` (ответ на сообщение) - использовать текст из сообщения"
-            )
             return
         
         if not new_title or not new_title.strip():
-            await message.reply_text("❌ Название чата не может быть пустым")
             return
         
         # Validate title length (Telegram limit is 255 characters)
         if len(new_title) > 255:
-            await message.reply_text("❌ Название чата слишком длинное (максимум 255 символов)")
             return
         
         # Try to rename chat
         await chat_manager.rename_chat(message, new_title.strip())
-        await message.reply_text(f"✅ Чат переименован в: {new_title.strip()}")
+        # Delete the command message
+        await message.delete()
         
     except ChatAdminRequired:
-        await message.reply_text("❌ У бота нет прав администратора в этом чате")
         logger.error(f"Bot lacks admin rights in chat {message.chat.id}")
     except ChatNotModified:
-        await message.reply_text("❌ Название чата уже установлено в это значение")
         logger.info(f"Chat {message.chat.id} title not modified (already set to same value)")
+        await message.delete()
     except Exception as e:
-        await message.reply_text(f"❌ Ошибка при переименовании чата: {str(e)}")
         logger.error(f"Error in rename handler: {str(e)}", exc_info=True)
