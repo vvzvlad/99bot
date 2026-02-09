@@ -139,6 +139,6 @@ def register_handler(client: Client, group: int = 0):
             if title_monitor:
                 await title_monitor.handle_title_change(message)
 
-        message.continue_propagation()
+        await message.continue_propagation()
 
     logger.info("Title monitor handler registered")
