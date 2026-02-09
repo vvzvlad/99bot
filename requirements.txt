@@ -1,4 +1,4 @@
 Kurigram
-#git+https://github.com/KurimuzonAkuma/pyrogram.git@dev#egg=Kurigram
 TgCrypto
 uvloop
+python-dotenv
