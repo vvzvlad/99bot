@@ -25,12 +25,9 @@ logger = logging.getLogger(__name__)
 # Get settings
 settings = get_settings()
 
-# Shutdown flag - будет создан в main()
-shutdown_event = None
 
 async def main():
     """Main bot function"""
-    global tg_client, shutdown_event
     
     setup_logging(settings["log_level"])
     
