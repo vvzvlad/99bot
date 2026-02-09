@@ -30,17 +30,20 @@ async def handle_repic(client: Client, message: Message):
             if message.reply_to_message.photo:
                 photo = message.reply_to_message.photo
             else:
+                await message.delete()
                 return
         # Check if current message has photo
         elif message.photo:
             photo = message.photo
         else:
+            await message.delete()
             return
         
         if not photo:
+            await message.delete()
             return
         
-        # Delete the command message FIRST
+        # Delete the command message
         await message.delete()
         
         # Download photo to temp directory

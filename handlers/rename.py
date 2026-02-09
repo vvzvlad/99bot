@@ -28,21 +28,25 @@ async def handle_rename(client: Client, message: Message):
             if message.reply_to_message.text:
                 new_title = message.reply_to_message.text
             else:
+                await message.delete()
                 return
         # Check if there's text after command
         elif message.text and len(message.text.split(maxsplit=1)) > 1:
             new_title = message.text.split(maxsplit=1)[1]
         else:
+            await message.delete()
             return
         
         if not new_title or not new_title.strip():
+            await message.delete()
             return
         
         # Validate title length (Telegram limit is 255 characters)
         if len(new_title) > 255:
+            await message.delete()
             return
         
-        # Delete the command message FIRST
+        # Delete the command message
         await message.delete()
         
         # Try to rename chat
