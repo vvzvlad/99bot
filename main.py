@@ -46,9 +46,8 @@ async def main():
         rename_watcher.register_handler(tg_client.client)
         repic_watcher.register_handler(tg_client.client)
         service_cleaner.register_handler(tg_client.client)
-        
-        # Register title change monitor (service message for new chat title)
         title_monitor.register_handler(tg_client.client)
+        
         # Wait for shutdown signal
         await shutdown_event.wait()
         
