@@ -15,6 +15,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import MessageServiceType, ChatMemberStatus
 from pyrogram.errors import ChatAdminRequired, PhotoInvalidDimensions, PhotoExtInvalid, FloodWait
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,28 @@ def _should_process_repic(message: Message) -> bool:
     command = command.split("@")[0]
     if command in {"репик"}:
         return random.random() <= 0.1
+    return True
+
+
+def _validate_sticker(sticker) -> bool:
+    """
+    Проверяет, что стикер статический (не анимированный, не видео)
+
+    Args:
+        sticker: Pyrogram Sticker object
+
+    Returns:
+        bool: True если стикер статический, False иначе
+    """
+    if sticker.is_animated:
+        logger.info(f"Rejected animated sticker (file_id: {sticker.file_id})")
+        return False
+
+    if sticker.is_video:
+        logger.info(f"Rejected video sticker (file_id: {sticker.file_id})")
+        return False
+
+    logger.info(f"Accepted static sticker: {sticker.file_id}, size: {sticker.width}x{sticker.height}")
     return True
 
 
@@ -51,7 +74,11 @@ async def handle_repic(client: Client, message: Message):
     - Обработка ошибок
     """
     temp_photo_path = None
-    
+    temp_sticker_path = None
+    media_type = None
+    has_sticker = False
+    sticker_to_convert = None
+
     # DEBUG: Log incoming message details
     logger.info(f"[REPIC DEBUG] Command received in chat {message.chat.id}")
     logger.info(f"[REPIC DEBUG] Message has photo: {message.photo is not None}")
@@ -73,26 +100,60 @@ async def handle_repic(client: Client, message: Message):
             if message.reply_to_message.photo:
                 photo = message.reply_to_message.photo
                 media_to_download = message.reply_to_message.photo
+                media_type = 'photo'
                 logger.info(f"[REPIC DEBUG] Using photo from reply message")
+            elif message.reply_to_message.sticker:
+                sticker = message.reply_to_message.sticker
+                if not _validate_sticker(sticker):
+                    #if sticker.is_animated:
+                    #    await message.reply("⚠️ Анимированные стикеры не поддерживаются. Используйте статичные стикеры.")
+                    #elif sticker.is_video:
+                    #    await message.reply("⚠️ Видео-стикеры не поддерживаются. Используйте статичные стикеры.")
+                    logger.warning(f"[REPIC DEBUG] Cannot use animated/video sticker")
+                    await message.delete()
+                    return
+                media_to_download = sticker
+                media_type = 'sticker'
+                has_sticker = True
+                sticker_to_convert = sticker
+                logger.info(f"[REPIC DEBUG] Using sticker from reply message")
             elif message.reply_to_message.document and message.reply_to_message.document.mime_type and message.reply_to_message.document.mime_type.startswith('image/'):
                 # Handle image sent as document/file
                 media_to_download = message.reply_to_message.document
+                media_type = 'document'
                 logger.info(f"[REPIC DEBUG] Using image document from reply message")
             else:
-                logger.warning(f"[REPIC DEBUG] Reply message has no photo or image document")
+                logger.warning(f"[REPIC DEBUG] Reply message has no photo, sticker, or image document")
                 await message.delete()
                 return
         # Check if current message has photo
         elif message.photo:
             photo = message.photo
             media_to_download = message.photo
+            media_type = 'photo'
             logger.info(f"[REPIC DEBUG] Using photo from current message")
+        elif message.sticker:
+            sticker = message.sticker
+            if not _validate_sticker(sticker):
+                #if sticker.is_animated:
+                #    await message.reply("⚠️ Анимированные стикеры не поддерживаются. Используйте статичные стикеры.")
+                #elif sticker.is_video:
+                #    await message.reply("⚠️ Видео-стикеры не поддерживаются. Используйте статичные стикеры.")
+                logger.warning(f"[REPIC DEBUG] Cannot use animated/video sticker")
+                await message.delete()
+                return
+            media_to_download = sticker
+            media_type = 'sticker'
+            has_sticker = True
+            sticker_to_convert = sticker
+            logger.info(f"[REPIC DEBUG] Using sticker from current message")
         elif message.document and message.document.mime_type and message.document.mime_type.startswith('image/'):
             # Handle image sent as document/file
             media_to_download = message.document
+            media_type = 'document'
             logger.info(f"[REPIC DEBUG] Using image document from current message")
         else:
-            logger.warning(f"[REPIC DEBUG] No photo or image document found in message")
+            logger.warning(f"[REPIC DEBUG] No photo, sticker, or image document found in message")
             await message.delete()
             return
 
@@ -121,29 +182,61 @@ async def handle_repic(client: Client, message: Message):
         logger.info(f"[REPIC DEBUG] Temp directory is dir: {os.path.isdir(temp_dir)}")
 
         # Generate unique filename
-        temp_photo_path = os.path.join(temp_dir, f"chat_photo_{message.chat.id}_{message.id}.jpg")
-        
-        logger.info(f"[REPIC DEBUG] Downloading media to: {temp_photo_path}")
-        logger.info(f"[REPIC DEBUG] Download path (absolute): {os.path.abspath(temp_photo_path)}")
+        if has_sticker:
+            temp_sticker_path = os.path.join(temp_dir, f"sticker_{message.chat.id}_{message.id}.webp")
+            temp_photo_path = os.path.join(temp_dir, f"chat_photo_{message.chat.id}_{message.id}.jpg")
 
-        # Download the photo
-        download_result = await client.download_media(media_to_download.file_id, file_name=temp_photo_path)
-        
-        # DEBUG: Log download result
-        logger.info(f"[REPIC DEBUG] Media downloaded successfully")
-        logger.info(f"[REPIC DEBUG] Download result path: {download_result}")
-        logger.info(f"[REPIC DEBUG] Expected path: {temp_photo_path}")
-        logger.info(f"[REPIC DEBUG] Expected path exists: {os.path.exists(temp_photo_path)}")
-        if download_result:
-            logger.info(f"[REPIC DEBUG] Download result exists: {os.path.exists(download_result)}")
-            logger.info(f"[REPIC DEBUG] Download result absolute: {os.path.abspath(download_result)}")
-        
-        # DEBUG: List files in temp directory
-        try:
-            temp_files = os.listdir(temp_dir)
-            logger.info(f"[REPIC DEBUG] Files in temp directory: {temp_files}")
-        except Exception as e:
-            logger.error(f"[REPIC DEBUG] Failed to list temp directory: {e}")
+            logger.info(f"[REPIC DEBUG] Downloading sticker to: {temp_sticker_path}")
+            download_result = await client.download_media(sticker_to_convert.file_id, file_name=temp_sticker_path)
+
+            logger.info(f"[REPIC DEBUG] Sticker downloaded: {download_result}")
+
+            if not os.path.exists(temp_sticker_path):
+                logger.error(f"Sticker file not found after download: {temp_sticker_path}")
+                return
+
+            try:
+                logger.info(f"[REPIC DEBUG] Converting sticker WebP to JPG")
+                with Image.open(temp_sticker_path) as img:
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        if img.mode == 'P':
+                            img = img.convert('RGBA')
+                        background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                        img = background
+                    elif img.mode != 'RGB':
+                        img = img.convert('RGB')
+
+                    img.save(temp_photo_path, 'JPEG', quality=95)
+                    logger.info(f"[REPIC DEBUG] Sticker converted to JPG: {temp_photo_path}")
+            except Exception as e:
+                logger.error("Failed to convert sticker to JPG", exc_info=True)
+                #await message.reply("❌ Ошибка конвертации стикера. Попробуйте другой стикер.")
+                return
+        else:
+            temp_photo_path = os.path.join(temp_dir, f"chat_photo_{message.chat.id}_{message.id}.jpg")
+
+            logger.info(f"[REPIC DEBUG] Downloading media to: {temp_photo_path}")
+            logger.info(f"[REPIC DEBUG] Download path (absolute): {os.path.abspath(temp_photo_path)}")
+
+            # Download the photo
+            download_result = await client.download_media(media_to_download.file_id, file_name=temp_photo_path)
+
+            # DEBUG: Log download result
+            logger.info(f"[REPIC DEBUG] Media downloaded successfully")
+            logger.info(f"[REPIC DEBUG] Download result path: {download_result}")
+            logger.info(f"[REPIC DEBUG] Expected path: {temp_photo_path}")
+            logger.info(f"[REPIC DEBUG] Expected path exists: {os.path.exists(temp_photo_path)}")
+            if download_result:
+                logger.info(f"[REPIC DEBUG] Download result exists: {os.path.exists(download_result)}")
+                logger.info(f"[REPIC DEBUG] Download result absolute: {os.path.abspath(download_result)}")
+
+            # DEBUG: List files in temp directory
+            try:
+                temp_files = os.listdir(temp_dir)
+                logger.info(f"[REPIC DEBUG] Files in temp directory: {temp_files}")
+            except Exception as e:
+                logger.error(f"[REPIC DEBUG] Failed to list temp directory: {e}")
 
         if not os.path.exists(temp_photo_path):
             logger.error(f"Photo file not found: {temp_photo_path}")
@@ -217,6 +310,13 @@ async def handle_repic(client: Client, message: Message):
                 logger.debug(f"Temp photo file removed: {temp_photo_path}")
             except Exception as e:
                 logger.warning(f"Failed to remove temp file {temp_photo_path}: {str(e)}")
+
+        if temp_sticker_path and os.path.exists(temp_sticker_path):
+            try:
+                os.remove(temp_sticker_path)
+                logger.debug(f"Temp sticker file removed: {temp_sticker_path}")
+            except Exception as e:
+                logger.warning(f"Failed to remove temp sticker file {temp_sticker_path}: {str(e)}")
 
 
 def register_handler(client: Client, group: int = 0):

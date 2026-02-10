@@ -2,3 +2,4 @@ Kurigram
 TgCrypto
 uvloop
 python-dotenv
+Pillow>=10.0.0
