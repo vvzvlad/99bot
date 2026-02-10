@@ -17,14 +17,10 @@ logger = logging.getLogger(__name__)
 async def handle_short_reply(client: Client, message: Message):
     try:
         text = (message.text or "").strip().lower()
-        if text != "/й":
-            return
-
-        if not message.reply_to_message:
-            return
-
-        if random.random() > 0.1:
-            return
+        
+        if text != "/й": return
+        if not message.reply_to_message: return
+        if random.random() > 0.1: return
 
         sent = await client.send_message(
             chat_id=message.chat.id,
