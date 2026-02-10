@@ -103,9 +103,13 @@ async def handle_rename(client: Client, message: Message):
 
         title_monitor = get_title_monitor()
         if title_monitor:
-            bot_me = await client.get_me()
-            bot_username = bot_me.username or bot_me.first_name or "bot"
-            await title_monitor.log_title_change(new_title, bot_username)
+            if message.from_user:
+                actor_username = message.from_user.username or message.from_user.first_name or "user"
+            elif message.sender_chat:
+                actor_username = message.sender_chat.title or "chat"
+            else:
+                actor_username = "user"
+            await title_monitor.log_title_change(new_title, actor_username)
 
     except ChatAdminRequired:
         logger.error(f"Bot lacks admin rights in chat {message.chat.id}")
