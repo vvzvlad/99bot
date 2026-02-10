@@ -19,6 +19,7 @@ from handlers import rename_watcher
 from handlers import repic_watcher
 from handlers import title_monitor
 from handlers import service_cleaner
+from handlers import short_reply_watcher
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ async def main():
 
         rename_watcher.register_handler(tg_client.client, group=0)
         repic_watcher.register_handler(tg_client.client, group=0)
+        short_reply_watcher.register_handler(tg_client.client, group=0)
         
         service_cleaner.register_handler(tg_client.client, group=1)
         
