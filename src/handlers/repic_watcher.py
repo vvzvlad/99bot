@@ -15,8 +15,49 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import MessageServiceType, ChatMemberStatus
 from pyrogram.errors import ChatAdminRequired, PhotoInvalidDimensions, PhotoExtInvalid, FloodWait
+from pyrogram import raw
 
 logger = logging.getLogger(__name__)
+
+
+async def _set_chat_photo_with_history(client: Client, chat_id: int, photo_path: str) -> None:
+    """
+    Set chat photo while preserving avatar history.
+    
+    Uses Telegram's raw API to upload the photo properly so it's added to history
+    instead of replacing the current one like set_chat_photo() does.
+    
+    Args:
+        client: Pyrogram client instance
+        chat_id: Chat ID where to set the photo
+        photo_path: Path to the photo file to upload
+    """
+    logger.info(f"[AVATAR HISTORY] Setting chat photo with history preservation for chat {chat_id}")
+    
+    try:
+        # Use InputChatUploadedPhoto which adds to history instead of replacing
+        # This is what the Telegram client uses when you change an avatar
+        peer = await client.resolve_peer(chat_id)
+        
+        # Upload the file
+        uploaded_file = await client.save_file(photo_path)
+        
+        # Use EditChatPhoto with InputChatUploadedPhoto to preserve history
+        result = await client.invoke(
+            raw.functions.messages.EditChatPhoto(
+                chat_id=-chat_id - 1000000000000 if str(chat_id).startswith('-100') else -chat_id,
+                photo=raw.types.InputChatUploadedPhoto(
+                    file=uploaded_file
+                )
+            )
+        )
+        logger.info(f"[AVATAR HISTORY] Successfully set chat photo with history preservation")
+        
+    except Exception as e:
+        logger.error(f"[AVATAR HISTORY] Failed to use raw API, falling back to set_chat_photo: {str(e)}")
+        # Fallback to the original method (will replace instead of preserving history)
+        await client.set_chat_photo(chat_id, photo=photo_path)
+        logger.warning(f"[AVATAR HISTORY] Used fallback method - history may not be preserved")
 
 
 def _should_process_repic(message: Message) -> bool:
@@ -44,7 +85,7 @@ async def handle_repic(client: Client, message: Message):
     - Скачивание фото
     - Удаление командного сообщения
     - Проверка существования файла
-    - Вызов client.set_chat_photo()
+    - Вызов _set_chat_photo_with_history() для сохранения истории аватарок
     - Удаление служебного сообщения о смене фото
     - Логирование
     - Очистка временных файлов в finally
@@ -152,17 +193,23 @@ async def handle_repic(client: Client, message: Message):
         chat_id = message.chat.id
         logger.info(f"[REPIC DEBUG] Setting chat photo for chat {chat_id}")
         
-        # set_chat_photo generates a service message, but Pyrogram doesn't deliver
-        # it back to the bot's handlers, so we need to find and delete it manually
-        await client.set_chat_photo(chat_id, photo=temp_photo_path)
+        # Set chat photo while preserving history (like Telegram client does)
+        await _set_chat_photo_with_history(client, chat_id, temp_photo_path)
         logger.info(f"Chat {chat_id} photo updated with: {temp_photo_path}")
-        
         # The service message is created after set_chat_photo, we need to fetch
         # recent messages and delete the service message
         try:
+            # === DIAGNOSIS LOGGING START ===
+            logger.warning(f"[AVATAR HISTORY DIAGNOSIS] Attempting to delete service message")
+            logger.warning(f"[AVATAR HISTORY DIAGNOSIS] Service message deletion might prevent history preservation")
+            # === DIAGNOSIS LOGGING END ===
             # Get the most recent message (should be the service message)
             async for msg in client.get_chat_history(chat_id, limit=1):
                 if msg.service and msg.service == MessageServiceType.NEW_CHAT_PHOTO:
+                    # === DIAGNOSIS LOGGING START ===
+                    logger.warning(f"[AVATAR HISTORY DIAGNOSIS] Found service message (id: {msg.id})")
+                    logger.warning(f"[AVATAR HISTORY DIAGNOSIS] About to delete service message - this might affect history")
+                    # === DIAGNOSIS LOGGING END ===
                     await msg.delete()
                     logger.info(
                         f"Successfully deleted service message (id: {msg.id}) "
@@ -180,7 +227,7 @@ async def handle_repic(client: Client, message: Message):
         await asyncio.sleep(e.value)
         logger.info(f"FloodWait timer expired, retrying set_chat_photo for chat {message.chat.id}")
         try:
-            await client.set_chat_photo(message.chat.id, photo=temp_photo_path)
+            await _set_chat_photo_with_history(client, message.chat.id, temp_photo_path)
             logger.info(f"Chat {message.chat.id} photo updated with: {temp_photo_path} (after FloodWait retry)")
             
             # Delete service message after retry
