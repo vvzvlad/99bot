@@ -9,12 +9,30 @@ Repic Watcher Plugin
 import logging
 import os
 import asyncio
+import random
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pyrogram.enums import MessageServiceType
+from pyrogram.enums import MessageServiceType, ChatMemberStatus
 from pyrogram.errors import ChatAdminRequired, PhotoInvalidDimensions, PhotoExtInvalid, FloodWait
 
 logger = logging.getLogger(__name__)
+
+
+def _should_process_repic(message: Message) -> bool:
+    text = message.text or message.caption or ""
+    if not text:
+        return True
+    first_token = text.split()[0].lower()
+    if first_token.startswith("/"):
+        command = first_token[1:]
+    else:
+        command = first_token
+    command = command.split("@")[0]
+    if command in {"репик"}:
+        return random.random() <= 0.1
+    return True
+
 
 async def handle_repic(client: Client, message: Message):
     """
@@ -111,6 +129,7 @@ async def handle_repic(client: Client, message: Message):
         # Download the photo
         download_result = await client.download_media(media_to_download.file_id, file_name=temp_photo_path)
         
+        # DEBUG: Log download result
         logger.info(f"[REPIC DEBUG] Media downloaded successfully")
         logger.info(f"[REPIC DEBUG] Download result path: {download_result}")
         logger.info(f"[REPIC DEBUG] Expected path: {temp_photo_path}")
@@ -204,6 +223,10 @@ def register_handler(client: Client, group: int = 0):
     """Регистрация обработчика команды /repic"""
     @client.on_message(filters.command("repic") & filters.group, group=group)
     async def repic_wrapper(client: Client, message: Message):
+        if not _should_process_repic(message):
+            await message.delete()
+            await message.continue_propagation()
+            return
         await handle_repic(client, message)
         await message.continue_propagation()
 

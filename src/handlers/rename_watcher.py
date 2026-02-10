@@ -7,6 +7,7 @@ Rename Watcher Plugin
 """
 
 import logging
+import random
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import MessageServiceType
@@ -14,6 +15,21 @@ from pyrogram.errors import ChatAdminRequired, ChatNotModified
 from handlers.title_monitor import get_title_monitor
 
 logger = logging.getLogger(__name__)
+
+
+def _should_process_rename(message: Message) -> bool:
+    text = message.text or message.caption or ""
+    if not text:
+        return True
+    first_token = text.split()[0].lower()
+    if first_token.startswith("/"):
+        command = first_token[1:]
+    else:
+        command = first_token
+    command = command.split("@")[0]
+    if command in {"ренейм", "ренаме"}:
+        return random.random() <= 0.1
+    return True
 
 
 async def handle_rename(client: Client, message: Message):
@@ -105,8 +121,12 @@ async def handle_rename(client: Client, message: Message):
 def register_handler(client: Client, group: int = 0):
     """Регистрация обработчика команды /rename"""
 
-    @client.on_message(filters.command("rename") & filters.group, group=group)
+    @client.on_message(filters.command(["rename", "ренейм", "ренаме"]) & filters.group, group=group)
     async def rename_wrapper(client: Client, message: Message):
+        if not _should_process_rename(message):
+            await message.delete()
+            await message.continue_propagation()
+            return
         await handle_rename(client, message)
         await message.continue_propagation()
 
