@@ -35,26 +35,40 @@ async def _set_chat_photo_with_history(client: Client, chat_id: int, photo_path:
     logger.info(f"[AVATAR HISTORY] Setting chat photo with history preservation for chat {chat_id}")
     
     try:
-        # Use InputChatUploadedPhoto which adds to history instead of replacing
-        # This is what the Telegram client uses when you change an avatar
+        # Get the peer to determine chat type
         peer = await client.resolve_peer(chat_id)
         
         # Upload the file
         uploaded_file = await client.save_file(photo_path)
         
-        # Use EditChatPhoto with InputChatUploadedPhoto to preserve history
-        result = await client.invoke(
-            raw.functions.messages.EditChatPhoto(
-                chat_id=-chat_id - 1000000000000 if str(chat_id).startswith('-100') else -chat_id,
-                photo=raw.types.InputChatUploadedPhoto(
-                    file=uploaded_file
+        # For supergroups/channels (starts with -100)
+        if isinstance(peer, (raw.types.InputPeerChannel, raw.types.InputPeerChat)):
+            if isinstance(peer, raw.types.InputPeerChannel):
+                # For channels/supergroups, use messages.EditChatPhoto
+                result = await client.invoke(
+                    raw.functions.channels.EditPhoto(
+                        channel=peer,
+                        photo=raw.types.InputChatUploadedPhoto(
+                            file=uploaded_file
+                        )
+                    )
                 )
-            )
-        )
-        logger.info(f"[AVATAR HISTORY] Successfully set chat photo with history preservation")
+            else:
+                # For basic groups, use messages.EditChatPhoto
+                result = await client.invoke(
+                    raw.functions.messages.EditChatPhoto(
+                        chat_id=peer.chat_id,
+                        photo=raw.types.InputChatUploadedPhoto(
+                            file=uploaded_file
+                        )
+                    )
+                )
+            logger.info(f"[AVATAR HISTORY] Successfully set chat photo with history preservation")
+        else:
+            raise Exception(f"Unsupported peer type: {type(peer)}")
         
     except Exception as e:
-        logger.error(f"[AVATAR HISTORY] Failed to use raw API, falling back to set_chat_photo: {str(e)}")
+        logger.error(f"[AVATAR HISTORY] Failed to use raw API, falling back to set_chat_photo: {str(e)}", exc_info=True)
         # Fallback to the original method (will replace instead of preserving history)
         await client.set_chat_photo(chat_id, photo=photo_path)
         logger.warning(f"[AVATAR HISTORY] Used fallback method - history may not be preserved")
