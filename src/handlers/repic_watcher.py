@@ -10,7 +10,6 @@ import logging
 import os
 import asyncio
 import random
-import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import MessageServiceType, ChatMemberStatus
@@ -18,21 +17,6 @@ from pyrogram.errors import ChatAdminRequired, PhotoInvalidDimensions, PhotoExtI
 from PIL import Image
 
 logger = logging.getLogger(__name__)
-
-
-def _should_process_repic(message: Message) -> bool:
-    text = message.text or message.caption or ""
-    if not text:
-        return True
-    first_token = text.split()[0].lower()
-    if first_token.startswith("/"):
-        command = first_token[1:]
-    else:
-        command = first_token
-    command = command.split("@")[0]
-    if command in {"репик"}:
-        return random.random() <= 0.1
-    return True
 
 
 def _validate_sticker(sticker) -> bool:
@@ -162,7 +146,7 @@ async def handle_repic(client: Client, message: Message):
             await message.delete()
             return
 
-        # Delete the command message
+        # Download the command message
         await message.delete()
 
         # Download photo to temp directory
@@ -323,8 +307,12 @@ def register_handler(client: Client, group: int = 0):
     """Регистрация обработчика команды /repic"""
     @client.on_message(filters.command("repic") & filters.group, group=group)
     async def repic_wrapper(client: Client, message: Message):
-        if not _should_process_repic(message):
-            await message.delete()
+        await handle_repic(client, message)
+        await message.continue_propagation()
+
+    @client.on_message(filters.command("репик") & filters.group, group=group)
+    async def repic_ru_wrapper(client: Client, message: Message):
+        if random.random() > 0.1:
             await message.continue_propagation()
             return
         await handle_repic(client, message)
