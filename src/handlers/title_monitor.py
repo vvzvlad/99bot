@@ -122,6 +122,45 @@ class TitleMonitor:
                 writer.writerow([timestamp, new_title, changed_by_username])
         except Exception as e:
             logger.error(f"Failed to write to CSV: {str(e)}", exc_info=True)
+    
+    def get_history(self, limit: int = 10):
+        """
+        Получить историю изменений названия чата
+        
+        Args:
+            limit: Максимальное количество записей для возврата (по умолчанию 10)
+        
+        Returns:
+            Список словарей с ключами: timestamp, new_title, changed_by_username
+            Сортировка: от новых к старым
+        """
+        try:
+            if not os.path.exists(self.csv_file):
+                logger.warning(f"CSV file not found: {self.csv_file}")
+                return []
+            
+            history = []
+            with open(self.csv_file, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    history.append({
+                        'timestamp': row['timestamp'],
+                        'new_title': row['new_title'],
+                        'changed_by_username': row['changed_by_username']
+                    })
+            
+            # Сортировка от новых к старым
+            history.sort(key=lambda x: x['timestamp'], reverse=True)
+            
+            # Применить лимит
+            if limit > 0:
+                history = history[:limit]
+            
+            return history
+            
+        except Exception as e:
+            logger.error(f"Failed to read history from CSV: {str(e)}", exc_info=True)
+            raise
 
 
 def register_handler(client: Client, group: int = 0):
