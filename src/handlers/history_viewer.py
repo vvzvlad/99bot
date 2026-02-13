@@ -69,6 +69,14 @@ async def handle_history(client: Client, message: Message):
     5. Обработать edge cases
     """
     try:
+        # Проверка: команда доступна только для @vvzvlad
+        if not message.from_user or message.from_user.username != "vvzvlad":
+            logger.info(
+                f"History command ignored: user {message.from_user.username if message.from_user else 'unknown'} "
+                f"is not authorized"
+            )
+            return
+        
         # Получить TitleMonitor instance
         title_monitor = get_title_monitor()
         
