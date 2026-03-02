@@ -14,12 +14,17 @@ Pidor Watcher Plugin
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
+from typing import Dict, Tuple
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
 logger = logging.getLogger(__name__)
+
+# In-memory кэш: (chat_id, date) -> True означает, что тег уже был отправлен сегодня
+# При первом вызове за день в данном чате — тегать (@username), при повторных — нет
+_announced: Dict[Tuple[int, date], bool] = {}
 
 
 def get_day_hash() -> str:
@@ -139,15 +144,39 @@ async def handle_pidor(client: Client, message: Message):
 
         winner = winner_member.user
 
+        # Определяем: первый ли это вызов сегодня в данном чате?
+        today = datetime.now(timezone.utc).date()
+        cache_key = (chat_id, today)
+        first_announcement = cache_key not in _announced
+
         # Формируем упоминание победителя
-        if winner.username:
-            mention = f"@{winner.username}"
+        # Первый раз за день — тегаем (@username или имя), повторно — без тега
+        if first_announcement:
+            if winner.username:
+                mention = f"@{winner.username}"
+            else:
+                first = winner.first_name or ""
+                last = winner.last_name or ""
+                mention = f"{first} {last}".strip() or f"id:{winner.id}"
         else:
+            # Повторный запрос — не тегаем, просто имя
             first = winner.first_name or ""
             last = winner.last_name or ""
-            mention = f"{first} {last}".strip() or f"id:{winner.id}"
+            name = f"{first} {last}".strip()
+            if winner.username:
+                mention = f"{winner.username}" if not name else name
+            else:
+                mention = name or f"id:{winner.id}"
 
         await message.reply_text(f"🌈 Пидор дня — {mention}!")
+
+        # Записываем в кэш после первого объявления
+        if first_announcement:
+            _announced[cache_key] = True
+            # Очищаем устаревшие записи (даты до сегодня)
+            stale_keys = [k for k in _announced if k[1] < today]
+            for k in stale_keys:
+                del _announced[k]
 
         logger.info(
             f"Pidor of the day in chat {chat_id}: user_id={winner.id}, "
