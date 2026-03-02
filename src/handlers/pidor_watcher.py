@@ -12,8 +12,10 @@ Pidor Watcher Plugin
 4. Победитель = участник с минимальным XOR-расстоянием от хеша дня
 """
 
+import asyncio
 import hashlib
 import logging
+import random
 from datetime import datetime, date, timezone
 from typing import Dict, Tuple
 
@@ -25,6 +27,36 @@ logger = logging.getLogger(__name__)
 # In-memory кэш: (chat_id, date) -> True означает, что тег уже был отправлен сегодня
 # При первом вызове за день в данном чате — тегать (@username), при повторных — нет
 _announced: Dict[Tuple[int, date], bool] = {}
+
+# Сообщения-интро (первый вызов за день)
+MESSAGES_INTRO = [
+    "Woop-woop! That's the sound of da pidor-police!",
+    "### RUNNING `TYPIDOR.SH`...",
+    "Опять в эти ваши игрульки играете? Ну ладно...",
+    "Инициирую поиск **пидора дня**...",
+    "Кто сегодня счастливчик?",
+    "Осторожно! **Пидор дня** активирован!",
+    "Зачем вы меня разбудили...",
+    "Итак... кто же сегодня **пидор дня**?",
+    "(Ворчит) А могли бы на работе делом заниматься",
+    "Сонно смотрит на бумаги",
+    "Ого-го...",
+    "Так-так, что же тут у нас...",
+    "Не может быть!",
+    "Ох...",
+    "КЕК!",
+]
+
+# Сообщения-результат (первый вызов за день), {} заменяется на @mention
+MESSAGES_RESULT = [
+    "Пидор дня обыкновенный, 1шт. - {}",
+    "И прекрасный человек дня сегодня... а нет, ошибка, всего-лишь пидор - {}",
+    "Кажется, пидор дня - {}",
+    "Ага! Поздравляю! Сегодня ты пидор - {}",
+    "Анализ завершен. Ты пидор, {}",
+    "Ну ты и пидор, {}",
+    ".∧＿∧ \n( ･ω･｡)つ━☆・*。 \n⊂  ノ    ・゜+. \nしーＪ   °。+ *´¨) \n         .· ´¸.·*´¨) \n          (¸.·´ (¸.·'* ☆ ВЖУХ И ТЫ ПИДОР, {}",
+]
 
 
 def get_day_hash() -> str:
@@ -154,34 +186,36 @@ async def handle_pidor(client: Client, message: Message):
         cache_key = (chat_id, today)
         first_announcement = cache_key not in _announced
 
-        # Формируем упоминание победителя
-        # Первый раз за день — тегаем (@username или имя), повторно — без тега
         if first_announcement:
+            # Первый вызов за день: интро → пауза → результат с @mention
             if winner.username:
-                mention = f"@{winner.username}"
+                tag_mention = f"@{winner.username}"
             else:
-                first = winner.first_name or ""
-                last = winner.last_name or ""
-                mention = f"{first} {last}".strip() or f"id:{winner.id}"
-        else:
-            # Повторный запрос — не тегаем, просто имя
-            first = winner.first_name or ""
-            last = winner.last_name or ""
-            name = f"{first} {last}".strip()
-            if winner.username:
-                mention = f"{winner.username}" if not name else name
-            else:
-                mention = name or f"id:{winner.id}"
+                first_name = winner.first_name or ""
+                last_name = winner.last_name or ""
+                tag_mention = f"{first_name} {last_name}".strip() or f"id:{winner.id}"
 
-        await message.reply_text(f"🌈 Пидор дня — {mention}!")
+            intro = random.choice(MESSAGES_INTRO)
+            result = random.choice(MESSAGES_RESULT).format(tag_mention)
 
-        # Записываем в кэш после первого объявления
-        if first_announcement:
+            await message.reply_text(intro)
+            await asyncio.sleep(2)
+            await message.reply_text(result)
+
+            # Записываем в кэш
             _announced[cache_key] = True
             # Очищаем устаревшие записи (даты до сегодня)
             stale_keys = [k for k in _announced if k[1] < today]
             for k in stale_keys:
                 del _announced[k]
+        else:
+            # Повторный запрос — не тегаем, просто имя
+            first_name = winner.first_name or ""
+            last_name = winner.last_name or ""
+            name = f"{first_name} {last_name}".strip()
+            plain_mention = name if name else (winner.username or f"id:{winner.id}")
+
+            await message.reply_text(f"🌈 Пидор дня — {plain_mention}!")
 
         logger.info(
             f"Pidor of the day in chat {chat_id}: user_id={winner.id}, "
