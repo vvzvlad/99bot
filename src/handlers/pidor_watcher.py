@@ -119,14 +119,19 @@ async def handle_pidor(client: Client, message: Message):
     try:
         chat_id = message.chat.id
 
+        # Получаем ID текущего аккаунта (userbot), чтобы исключить его из выборки
+        me = await client.get_me()
+
         # Собираем всех участников чата
         members = []
         async for member in client.get_chat_members(chat_id):
             user = member.user
-            # Пропускаем ботов и удалённые аккаунты
+            # Пропускаем ботов, удалённые аккаунты и сам аккаунт бота
             if user.is_bot:
                 continue
             if user.is_deleted:
+                continue
+            if user.id == me.id:
                 continue
             members.append(member)
 
