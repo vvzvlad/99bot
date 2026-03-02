@@ -54,7 +54,7 @@ async def main():
         history_viewer.register_handler(tg_client.client, group=0)
         pidor_watcher.register_handler(tg_client.client, group=0)
         
-        service_cleaner.register_handler(tg_client.client, group=1)
+        #service_cleaner.register_handler(tg_client.client, group=1)
         
         # Wait for shutdown signal
         await shutdown_event.wait()
