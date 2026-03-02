@@ -198,9 +198,9 @@ async def handle_pidor(client: Client, message: Message):
             intro = random.choice(MESSAGES_INTRO)
             result = random.choice(MESSAGES_RESULT).format(tag_mention)
 
-            await message.reply_text(intro)
+            await client.send_message(chat_id, intro)
             await asyncio.sleep(2)
-            await message.reply_text(result)
+            await client.send_message(chat_id, result)
 
             # Записываем в кэш
             _announced[cache_key] = True
