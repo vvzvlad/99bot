@@ -145,13 +145,9 @@ async def handle_pidor(client: Client, message: Message):
         else:
             first = winner.first_name or ""
             last = winner.last_name or ""
-            full_name = f"{first} {last}".strip() or f"id:{winner.id}"
-            mention = f"[{full_name}](tg://user?id={winner.id})"
+            mention = f"{first} {last}".strip() or f"id:{winner.id}"
 
-        await message.reply_text(
-            f"🌈 Пидор дня — {mention}!",
-            parse_mode="md"
-        )
+        await message.reply_text(f"🌈 Пидор дня — {mention}!")
 
         logger.info(
             f"Pidor of the day in chat {chat_id}: user_id={winner.id}, "
