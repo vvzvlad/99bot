@@ -21,6 +21,7 @@ from handlers import title_monitor
 from handlers import service_cleaner
 from handlers import short_reply_watcher
 from handlers import history_viewer
+from handlers import pidor_watcher
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ async def main():
         repic_watcher.register_handler(tg_client.client, group=0)
         short_reply_watcher.register_handler(tg_client.client, group=0)
         history_viewer.register_handler(tg_client.client, group=0)
+        pidor_watcher.register_handler(tg_client.client, group=0)
         
         service_cleaner.register_handler(tg_client.client, group=1)
         
