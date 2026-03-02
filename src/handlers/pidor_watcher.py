@@ -150,7 +150,7 @@ async def handle_pidor(client: Client, message: Message):
 
         await message.reply_text(
             f"🌈 Пидор дня — {mention}!",
-            parse_mode="markdown"
+            parse_mode="md"
         )
 
         logger.info(
