@@ -3,9 +3,26 @@
 
 import os
 import logging
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _LOGGING_INITIALIZED = False
+
+
+def get_app_timezone() -> ZoneInfo:
+    """Return timezone configured via TZ env var (fallback: UTC)."""
+    tz_name = os.getenv("TZ", "UTC")
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        logging.warning("Invalid TZ '%s', falling back to UTC", tz_name)
+        return ZoneInfo("UTC")
+
+
+def now_in_app_timezone() -> datetime:
+    """Return current timezone-aware datetime in app timezone."""
+    return datetime.now(get_app_timezone())
 
 def setup_logging(level_name: str = "INFO") -> None:
     global _LOGGING_INITIALIZED 

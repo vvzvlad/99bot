@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
 
 from pyrogram import Client
 from pyrogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
+from config import now_in_app_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -570,9 +570,9 @@ ARTICLES = [line.strip() for line in ARTICLES_RAW.splitlines() if line.strip().s
 
 
 def get_day_hash() -> str:
-    now_utc = datetime.now(timezone.utc)
-    midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    unix_ts = int(midnight_utc.timestamp())
+    now_local = now_in_app_timezone()
+    midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    unix_ts = int(midnight_local.timestamp())
     return hashlib.sha256(str(unix_ts).encode()).hexdigest()
 
 
@@ -639,4 +639,3 @@ def register_handler(client: Client, group: int = 0):
         await handle_inline(client, inline_query)
 
     logger.info("UK inline watcher handler registered")
-

@@ -8,7 +8,7 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import MessageServiceType
-from config import get_settings
+from config import get_settings, now_in_app_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +82,8 @@ class TitleMonitor:
                     # For bots without username, use first_name or "bot"
                     changed_by_username = message.from_user.first_name or "bot"
             
-            # Get current timestamp
-            timestamp = datetime.utcnow().isoformat()
+            # Get current timestamp in app timezone (TZ env)
+            timestamp = now_in_app_timezone().isoformat()
             
             # Write to CSV
             self._write_to_csv(timestamp, new_title, changed_by_username)
@@ -105,7 +105,7 @@ class TitleMonitor:
             changed_by_username: Username of who changed the title
         """
         try:
-            timestamp = datetime.utcnow().isoformat()
+            timestamp = now_in_app_timezone().isoformat()
             self._write_to_csv(timestamp, new_title, changed_by_username)
             logger.info(
                 f"Title change logged directly: new_title='{new_title}', "

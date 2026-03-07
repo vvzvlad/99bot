@@ -16,11 +16,12 @@ import asyncio
 import hashlib
 import logging
 import random
-from datetime import datetime, date, timezone
+from datetime import date
 from typing import Dict, Tuple
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
+from config import now_in_app_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +70,9 @@ def get_day_hash() -> str:
     Returns:
         hex-строка sha256 (64 символа)
     """
-    now_utc = datetime.now(timezone.utc)
-    midnight_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    unix_ts = int(midnight_utc.timestamp())
+    now_local = now_in_app_timezone()
+    midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    unix_ts = int(midnight_local.timestamp())
     return hashlib.sha256(str(unix_ts).encode()).hexdigest()
 
 
@@ -182,7 +183,7 @@ async def handle_pidor(client: Client, message: Message):
         winner = winner_member.user
 
         # Определяем: первый ли это вызов сегодня в данном чате?
-        today = datetime.now(timezone.utc).date()
+        today = now_in_app_timezone().date()
         cache_key = (chat_id, today)
         first_announcement = cache_key not in _announced
 
