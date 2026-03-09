@@ -32,18 +32,24 @@ def format_history_message(history: list) -> str:
         ValueError: если сообщение превышает MAX_MESSAGE_LENGTH
     """
     lines = []
-    
+
     for entry in history:
         new_title = entry['new_title']
-        username = entry['changed_by_username']
-        
-        # Формат: "Новое название (изменил @username)"
-        if username:
-            user_display = f"@{username}" if not username.startswith('@') else username
-            line = f"{new_title} (изменил {user_display})"
+        actor = entry.get('changed_by_username') or ""
+        source = entry.get('title_source_username') or ""
+
+        # Убираем случайные @ в начале, если вдруг сохранились
+        actor = actor.lstrip('@')
+        source = source.lstrip('@')
+
+        if actor and source and source != actor:
+            # Переименовал один, название взял из чужого сообщения
+            line = f"{new_title} (переименовал {actor}, из сообщения {source})"
+        elif actor:
+            line = f"{new_title} (переименовал {actor})"
         else:
-            line = f"{new_title} (изменил неизвестный)"
-        
+            line = f"{new_title} (переименовал неизвестный)"
+
         lines.append(line)
     
     message = "\n".join(lines)
