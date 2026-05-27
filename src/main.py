@@ -23,6 +23,7 @@ from handlers import short_reply_watcher
 from handlers import history_viewer
 from handlers import pidor_watcher
 from handlers import uk_inline_watcher
+from handlers import lena_watcher
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ async def main():
         history_viewer.register_handler(tg_client.client, group=0)
         pidor_watcher.register_handler(tg_client.client, group=0)
         uk_inline_watcher.register_handler(tg_client.client, group=0)
+        lena_watcher.register_handler(tg_client.client, group=0)
         
         #service_cleaner.register_handler(tg_client.client, group=1)
         
