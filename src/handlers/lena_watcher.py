@@ -21,6 +21,10 @@ TOTAL_DAYS = 280  # 40 weeks
 # Progress bar length in characters (each character represents 5%)
 BAR_LENGTH = 20
 
+# Lena's Telegram user id (@lacca0). Numeric id is stable and cannot be
+# hijacked, unlike a username, so we match only by id.
+LENA_USER_IDS = [319917291]
+
 # Russian month names in genitive case for date formatting
 MONTHS_RU = {
     1: "января", 2: "февраля", 3: "марта", 4: "апреля",
@@ -79,9 +83,12 @@ async def handle_lena(client: Client, message: Message):
 
 
 def register_handler(client: Client, group: int = 0):
-    """Register /lena command handler"""
+    """Register /lena command handler (groups, plus private chat for Lena only)"""
 
-    @client.on_message(filters.command(["lena"]) & filters.group, group=group)
+    @client.on_message(
+        filters.command(["lena"]) & (filters.group | (filters.private & filters.user(LENA_USER_IDS))),
+        group=group,
+    )
     async def lena_wrapper(client: Client, message: Message):
         await handle_lena(client, message)
         await message.continue_propagation()
