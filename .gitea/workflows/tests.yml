@@ -1,0 +1,199 @@
+name: Tests
+
+# PR gate. This workflow deliberately never logs in to the registry and never pushes, and
+# not one `secrets` expression appears anywhere in this file — the word shows up only in
+# prose like this line, never as a value, so there is nothing here for a leak to leak. It
+# proves that the image still builds, that its declared command still matches the file it
+# names, that the missing-environment guard still fires, that every Kurigram symbol the
+# handlers use still exists and every register_handler() function still runs — while
+# :latest, the tag the `99bot` container in the `telegram_bots` stack (id 140) on
+# nebula.lc follows, stays untouched by PR branches.
+#
+# The GHCR workflow this replaces did the opposite: it triggered on `pull_request` AND
+# pushed :latest in the same job, so opening a pull request shipped it to production.
+on:
+  # Manual re-run: without it a run that flaked on runner networking could only be retried
+  # by pushing an empty commit to the PR branch. Safe to expose here — this workflow
+  # touches no registry and no secrets, it only builds and smoke-tests.
+  workflow_dispatch:
+  # A pull request runs its own head on cirunner-hatbox, which is self-hosted and mounts
+  # the host's docker socket, so in general `pull_request` means "execute a contributor's
+  # code as root on a machine the whole fleet shares". What takes the edge off it here is
+  # who can open one: self-registration on gitea.vvzvlad.xyz is disabled (`/user/sign_up`
+  # answers "Registration is disabled"), so there is no way for an outsider to get an
+  # account, hence no fork and no PR from one. Every PR this trigger can ever fire on comes
+  # from a branch somebody already trusted with push access.
+  # A same-repo guard on `github.event.pull_request.head.repo.full_name` is the textbook
+  # fix and is deliberately NOT written here: that expression is unverified on Gitea, and
+  # an `if:` that silently evaluates to false turns this gate into one that never runs and
+  # always looks green — strictly worse than what it would be protecting against. It is
+  # also a fleet-wide question rather than this repo's: when it is done it should be done
+  # in every repository at once, after checking the expression against a real Gitea.
+  pull_request:
+    # `master`, not `main`: that is this repo's default branch, unlike every sibling repo
+    # in the fleet. A `main` here would produce a gate that silently never runs, which
+    # looks exactly like a gate that always passes.
+    branches: [ "master" ]
+
+permissions:
+  contents: read   # checkout
+
+# Nothing here is published, so a superseded run has no value: when a PR gets a new push,
+# kill the in-flight check and run the fresh head instead. This is the opposite of
+# image-check-publish.yml, where cancelling would leave holes in the :<sha> tag history.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    # `ubuntu-latest` is a LABEL, not a machine: the instance-level runner registered in
+    # Gitea as `cirunner-hatbox` (VM 209 on hatbox, 10.31.80.248) advertises exactly two,
+    # `ubuntu-latest` and `ubuntu-22.04`. Writing the runner's own name here would leave
+    # the job queued forever, because no runner offers a label by that name.
+    runs-on: ubuntu-latest
+    # That runner is shared by every repository in the fleet, so a hung step does not just
+    # stall this run — it holds one of its two capacity slots that everyone else is
+    # queueing for. Gitea's own default is far too generous for that.
+    # Deliberately the same outer bound as image-check-publish.yml, so the two gates cannot
+    # drift apart on a number that is easy to change in one file and forget in the other.
+    # It is only ever an outer bound: this job has no push step, so its step-level timeouts
+    # (20 build + 10 smoke = 30 minutes) are the ones act_runner actually enforces, and 55
+    # leaves the rest for checkout and the two cleanup steps. It must stay above their sum:
+    # a job killed by this timeout may never run its `if: always()` cleanup, leaving
+    # containers and a few hundred MB of image on the docker daemon shared by the whole
+    # fleet.
+    timeout-minutes: 55
+    # Job-level, so the smoke step and the cleanup step below cannot disagree about it.
+    # They are the two ends of the same mechanism — ci/smoke.py names its three containers
+    # after this, the cleanup step removes them by the same name — and written as two
+    # separate literals they would go on looking correct while one of them was edited,
+    # turning the cleanup into a step that removes nothing and reports success.
+    # The run id is what keeps concurrent runs on this shared daemon from colliding, and
+    # ci/smoke.py refuses to start without this variable rather than falling back to a
+    # constant, which would reintroduce exactly that collision.
+    env:
+      SMOKE_NAME: 99bot-pr-check-${{ github.run_id }}
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Compute the local image tag
+      id: tags
+      # A purely local tag: no registry host in front of it, so there is nothing here that
+      # `docker push` could even target. The run id keeps concurrent PR checks on the
+      # shared runner daemon from clobbering each other's tag.
+      env:
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        echo "local=99bot-pr-check:$RUN_ID" >> "$GITHUB_OUTPUT"
+
+    - name: Build the Docker image
+      # Step-level `timeout-minutes` is the one known to be enforced by Gitea's act_runner;
+      # the job-level one above is only the outer bound. 20 minutes is far above a
+      # realistic cold build: `python:3.11-slim` plus a `pip install` of five requirements
+      # that all publish manylinux wheels, so nothing is compiled. Same number as in
+      # image-check-publish.yml: the two gates build the identical Dockerfile and must not
+      # disagree about how long that is allowed to take.
+      timeout-minutes: 20
+      env:
+        # Through the environment rather than interpolated into the script text, same rule
+        # as everywhere else in this repo's workflows.
+        LOCAL_TAG: ${{ steps.tags.outputs.local }}
+      run: |
+        # --pull for the same reason as in image-check-publish.yml: cirunner-hatbox is
+        # self-hosted with a persistent docker daemon, so without the flag a stale
+        # python:3.11-slim could sit in the cache for months. And as there, this is a
+        # BuildKit build despite the absence of `docker buildx` — that has been
+        # `docker build`'s default since Engine 23.0.
+        docker build --pull . --file Dockerfile --tag "$LOCAL_TAG"
+
+    - name: Smoke-test the built image
+      # There are no tests in this repo, so this is the whole PR gate. It runs the exact
+      # same ci/smoke.py against the exact same kind of container as
+      # image-check-publish.yml — only on a local tag, with no login and no push. Keeping
+      # the gate in one file is the point: two copies of it would drift, and the PR gate
+      # would stop matching the gate that guards production.
+      #
+      # ci/smoke.py runs on the RUNNER and drives `docker run` itself, rather than being
+      # piped into a container as in the sibling repos: two of its checks are about the
+      # container as a whole — how the image behaves with no environment at all, and what
+      # `docker inspect` says its CMD is — and neither can be answered from a process
+      # already running inside it. `python3` (3.12) is present in the runner's job image
+      # `docker.gitea.com/runner-images:ubuntu-latest`; a bare `python` is NOT, which is
+      # why the command below spells out python3.
+      #
+      # The gate logs in nowhere and holds no credential: it passes an obviously fake
+      # api_id/api_hash pair, which is exactly what guarantees the one check that does call
+      # `start()` gets nowhere. That is what lets this run on a pull request at all — the
+      # real userbot session lives on a volume on nebula and is never going to be available
+      # here, nor should it be. It DOES reach Telegram at that one point, since `start()`
+      # is `connect()` and that opens a TCP connection to a data centre; it is not a flake
+      # risk, because the log line that check waits for is written by main() before the
+      # client is even constructed, so the verdict is taken before anything touches the
+      # network and a Telegram outage cannot redden this gate.
+      #
+      # Nothing is published to the host: no port is mapped and all three containers it
+      # starts carry the run id in their names, so parallel runs on this shared daemon
+      # cannot collide — and, more to the point, anything left behind is removable by name.
+      #
+      # Step-level `timeout-minutes`, the one act_runner is known to enforce (the job-level
+      # one is only the outer bound). Same 10 minutes as in image-check-publish.yml, for
+      # the same arithmetic: ci/smoke.py's own documented worst case is 465 s if every
+      # docker call it makes runs out its individual bound, and in practice the whole gate
+      # is well under a minute.
+      timeout-minutes: 10
+      env:
+        # SMOKE_NAME is not here: it is set once at job level, so this step and the cleanup
+        # step below are guaranteed to be talking about the same containers.
+        SMOKE_IMAGE: ${{ steps.tags.outputs.local }}
+      # The body of this step is byte-identical to the one in image-check-publish.yml. Only
+      # the `env:` values above differ. The PR gate and the publishing gate must run the
+      # same checks against the same kind of container, and the cheapest way to guarantee
+      # that is for the two to be literally the same text — anything else drifts, and it
+      # drifts silently, in the direction of the PR gate testing less.
+      run: |
+        python3 ci/smoke.py
+
+    - name: Remove the smoke containers from the runner
+      # `always()`, and before the image cleanup below: cirunner-hatbox has one persistent
+      # docker daemon shared by every repository, so a container left behind by a failed
+      # run would sit there forever — and would also pin the image, making the `docker rmi`
+      # in the next step fail.
+      # ci/smoke.py removes all three itself — the two short-lived ones before it starts
+      # them, the long-lived one in a `finally` — so on a normal run this is a no-op. It
+      # exists for the run where the step above was killed by its own timeout and never
+      # reached any of that.
+      # All THREE suffixes are removed, not just the long-lived container: `--rm` disposes
+      # of a container that EXITED, and the case this step is for is the container that did
+      # not. When ci/smoke.py's own subprocess timeout fires it kills the docker client on
+      # the runner, not the container on the daemon — so a hung guard or probe survives its
+      # `--rm` and has to be removed here, by the name ci/smoke.py gave it for exactly this
+      # purpose.
+      # $SMOKE_NAME comes from the job-level `env:` — the same value the smoke step passed
+      # to ci/smoke.py, not a second copy of the expression that could drift from it.
+      if: always()
+      run: |
+        # The empty suffix is check (d)'s container; -guard and -probe are the two the gate
+        # runs with `--rm`. Kept in step with GUARD_SUFFIX/PROBE_SUFFIX in ci/smoke.py.
+        # No `set -eu` here on purpose: this is best-effort cleanup, every removal already
+        # ends in `|| true`, and failing the step would turn a leftover container into a
+        # red job.
+        for suffix in "" -guard -probe; do docker rm -f "$SMOKE_NAME$suffix" || true; done
+
+    - name: Remove the built image from the runner
+      # The runner's docker daemon is persistent and shared with other repos, so every PR
+      # check would otherwise leave an image behind forever. Removes ONLY the tag this run
+      # created — no `docker system prune`, which would also wipe the images of every other
+      # repo sharing the same daemon.
+      # This gate runs on every push to a PR, so it produces MORE of that garbage than the
+      # publishing workflow does — see the full note in image-check-publish.yml.
+      # It does NOT reclaim everything: `docker rmi <tag>` never frees the BuildKit cache
+      # (a separate builder store, reclaimed only by `docker builder prune`), and `--pull`
+      # leaves the previous base image dangling whenever upstream publishes a new
+      # python:3.11-slim digest. Both need a separate periodic cleanup on the runner host.
+      # `always()` so a failed smoke still cleans up after itself.
+      if: always()
+      env:
+        LOCAL_TAG: ${{ steps.tags.outputs.local }}
+      run: |
+        docker rmi "$LOCAL_TAG" || true
