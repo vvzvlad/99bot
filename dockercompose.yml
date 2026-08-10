@@ -20,7 +20,7 @@ volumes:
 
 services:
   99bot:
-    # Published by .gitea/workflows/image-check-publish.yml on every push to master, after
+    # Published by .gitea/workflows/image-check-publish.yml on every push to main, after
     # the smoke gate passes. Moved off ghcr.io/vvzvlad/99bot when the repo migrated to
     # Gitea; GitHub is a push-mirror now and publishes nothing. The `99bot_ng` in the line
     # this replaces was never right — the GHCR workflow derived its path from

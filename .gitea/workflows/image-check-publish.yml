@@ -37,7 +37,7 @@ name: Docker Image CI
 on:
   workflow_dispatch:
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
 
 # No `packages: write` here: that scope is GitHub-specific and has no effect on Gitea
 # Actions — the built-in GITEA_TOKEN carries no package scope at all. The registry push
@@ -91,14 +91,20 @@ jobs:
 
     - name: Compute image tags
       id: tags
-      # master -> :latest + :<sha> (production follows :latest); ANY other branch ->
+      # main -> :latest + :<sha> (production follows :latest); ANY other branch ->
       # :<branch>.
-      # The check is against `master` because that is THIS repo's default branch. It is
-      # the one line in this file that differs from every sibling repo in the fleet, all of
-      # which live on `main`, and copying one of those verbatim would produce a workflow
-      # that builds happily on every push and never once produces the :latest that
-      # production actually pulls.
-      # Only master is pushed to by the trigger above, but workflow_dispatch can be fired
+      # The branch name in the check below and the `branches:` filter at the top of this
+      # file must both name the repo's REAL default branch, and they move together or not
+      # at all. Renaming that branch invalidates both of them — and, outside this file, the
+      # `pull_request` filter in tests.yml and the comment in dockercompose.yml, so this
+      # list is a starting point rather than the whole of it. Neither mismatch here fails
+      # loudly, which is the danger: a `branches:` filter naming a branch that does not
+      # exist stops pushes from triggering this workflow at all — only a manual dispatch
+      # still runs it, and it still publishes — while a wrong name in the check below
+      # leaves it building happily on every push and never once producing the :latest that
+      # production actually pulls. Neither puts anything red in the run list, which is what
+      # makes both indistinguishable from a gate that passes.
+      # Only main is pushed to by the trigger above, but workflow_dispatch can be fired
       # off any ref, so the else branch still has to be correct.
       # Do NOT hardcode a fixed tag in the else branch: a build off a side branch would
       # then silently overwrite the tag production deploys from — one typo away from
@@ -125,7 +131,7 @@ jobs:
         # against a production stack that had always pulled plain `99bot`. Deriving the
         # path from $REPO is what stops a hand-typed name drifting like that again.
         IMAGE="gitea.vvzvlad.xyz/$(printf '%s' "$REPO" | tr 'A-Z' 'a-z')"
-        if [ "$REF_NAME" = "master" ]; then
+        if [ "$REF_NAME" = "main" ]; then
           # Tag ORDER matters and must not be "tidied up": the push step iterates over
           # $TAGS left to right, so :latest is pushed LAST and acts as the commit of the
           # whole publication. If :<sha> fails to push (network, registry quota, disk), the
@@ -150,8 +156,8 @@ jobs:
           # The sanitiser passes a name through untouched when it already consists of legal
           # characters, so a branch literally named `latest` would come out as the
           # production tag and — one manual workflow_dispatch later — ship unreviewed code
-          # into the stack. The `master` check above does not cover this: the branch is not
-          # `master`, it only borrows its tag.
+          # into the stack. The `main` check above does not cover this: the branch is not
+          # `main`, it only borrows its tag.
           # Reserved names are therefore prefixed instead of being used as-is.
           if [ "$branch_tag" = "latest" ]; then
             branch_tag="branch-latest"

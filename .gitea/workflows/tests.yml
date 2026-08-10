@@ -30,10 +30,11 @@ on:
   # also a fleet-wide question rather than this repo's: when it is done it should be done
   # in every repository at once, after checking the expression against a real Gitea.
   pull_request:
-    # `master`, not `main`: that is this repo's default branch, unlike every sibling repo
-    # in the fleet. A `main` here would produce a gate that silently never runs, which
-    # looks exactly like a gate that always passes.
-    branches: [ "master" ]
+    # This has to name the repo's REAL default branch — the base pull requests are opened
+    # against — so a rename of that branch has to be followed here. A name that no longer
+    # matches does not fail, it goes quiet: the trigger stops matching, so the gate never
+    # runs, and a gate that never runs looks exactly like a gate that always passes.
+    branches: [ "main" ]
 
 permissions:
   contents: read   # checkout
