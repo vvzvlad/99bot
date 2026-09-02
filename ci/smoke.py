@@ -79,7 +79,7 @@ DUMMY_API_ID = "12345"
 DUMMY_API_HASH = "0123456789abcdef0123456789abcdef"
 
 # Where the probe and the boot check are told to keep their session file. NOT the image's
-# own default (`data`, i.e. /app/data, which on nebula is the telegram_bots_99bot volume
+# own default (`data`, i.e. /app/data, which in production is the telegram_bots_99bot volume
 # holding the real chat_manager_bot.session): pointing it at /tmp keeps every write this
 # gate causes inside the container's own writable layer, so nothing it does could ever be
 # confused for a session.

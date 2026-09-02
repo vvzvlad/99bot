@@ -2,7 +2,7 @@ name: Docker Image CI
 
 # No `pull_request` trigger here on purpose: this workflow pushes :latest, and :latest is
 # what production follows — the `99bot` container in the `telegram_bots` stack on
-# nebula.lc carries `com.centurylinklabs.watchtower.enable=true`, which Portainer's own
+# the production Docker host carries `com.centurylinklabs.watchtower.enable=true`, which Portainer's own
 # auto-updater honours alongside `io.portainer.update.enable`. A PR branch must never move
 # that tag; PRs are covered by tests.yml, which runs the same gate but never pushes.
 on:
@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   build:
-    # A label, not a machine name: the shared runner `cirunner-hatbox` advertises
+    # A label, not a machine name: the shared self-hosted runner advertises
     # `ubuntu-latest` and `ubuntu-22.04`; any other name leaves the job queued forever.
     runs-on: ubuntu-latest
     # The runner is shared by the whole fleet. Must exceed the sum of the step timeouts

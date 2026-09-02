@@ -1,5 +1,5 @@
 # Mirrors what actually runs in production: the `telegram_bots` stack (id 140) in Portainer
-# on nebula.lc. Keep this file and that stack in step — the copy that is deployed lives in
+# on the production Docker host. Keep this file and that stack in step — the copy that is deployed lives in
 # Portainer, this one is the readable record of it.
 #
 # Two deliberate differences from the deployed copy:

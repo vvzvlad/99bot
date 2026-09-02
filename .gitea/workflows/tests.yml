@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   build-and-smoke:
-    # A label, not a machine name: the shared runner `cirunner-hatbox` advertises
+    # A label, not a machine name: the shared self-hosted runner advertises
     # `ubuntu-latest` and `ubuntu-22.04`; any other name leaves the job queued forever.
     runs-on: ubuntu-latest
     # Same outer bound as image-check-publish.yml. Must exceed the step timeouts
