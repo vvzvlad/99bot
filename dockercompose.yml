@@ -2,16 +2,11 @@
 # on nebula.lc. Keep this file and that stack in step — the copy that is deployed lives in
 # Portainer, this one is the readable record of it.
 #
-# Two differences from the deployed copy are deliberate and will not go away, so they are
-# named here rather than left to be discovered as drift:
-#   * TG_API_ID and TG_API_HASH are literal values on the stack and stay placeholders here.
-#     No version of this file ever carries them — see the note at the environment block.
-#   * the stack is one service of several (doorman, currva_converter_bot, medical_bot and
-#     the rest share it); this file describes only the 99bot half of it.
-# Anything else that differs is drift and should be reconciled, in whichever direction is
-# correct. One such item is open right now: the stack still pulls
-# `ghcr.io/vvzvlad/99bot:latest`, and the image below is where the Gitea workflow now
-# publishes. Production has to be repointed at it for the migration to be finished.
+# Two deliberate differences from the deployed copy:
+#   * TG_API_ID and TG_API_HASH are literal values on the stack and placeholders here;
+#   * the stack holds several services; this file describes only 99bot.
+# Anything else that differs is drift. Open item: the stack still pulls
+# `ghcr.io/vvzvlad/99bot:latest` and has to be repointed at the image below.
 volumes:
   # Holds chat_manager_bot.session, the Kurigram session for the userbot account. Losing it
   # means re-authorising by hand with a phone number and a code, so it has to stay a named
@@ -21,31 +16,21 @@ volumes:
 services:
   99bot:
     # Published by .gitea/workflows/image-check-publish.yml on every push to main, after
-    # the smoke gate passes. Moved off ghcr.io/vvzvlad/99bot when the repo migrated to
-    # Gitea; GitHub is a push-mirror now and publishes nothing. The `99bot_ng` in the line
-    # this replaces was never right — the GHCR workflow derived its path from
-    # github.repository, i.e. `vvzvlad/99bot`, and production has always pulled that. The
-    # `_ng` survives only in the name of the local working copy.
+    # the smoke gate passes. GitHub is a push-mirror and publishes nothing.
     image: gitea.vvzvlad.xyz/projects/99bot:latest
     container_name: 99bot
-    # `always`, matching the stack, and NOT `unless-stopped`: they differ exactly once, on
-    # a daemon restart after somebody stopped the container by hand, and this bot is meant
-    # to come back. The missing-environment guard in src/config.py is what keeps that from
-    # turning a misconfiguration into a silent loop — it exits 1 with a message on every
-    # attempt, so the restarts are noisy in the log rather than invisible.
+    # `always`, matching the stack: the bot comes back even after a manual stop and a
+    # daemon restart. A misconfiguration does not loop silently: src/config.py exits 1
+    # with a message on every attempt.
     restart: always
     volumes:
       - 99bot:/app/data
     environment:
       TZ: Europe/Moscow
-      # Telegram API credentials for the userbot account. This is the one place where the
-      # file knowingly does NOT mirror the stack: on the stack both are literal values, and
-      # here they are placeholders, permanently. NO values here on purpose — the real ones
-      # are set on the stack in Portainer and must never land in git. src/config.py
-      # exits 1 with "TG_API_ID and TG_API_HASH must be set" when either is missing, so a
-      # deployment that forgets them fails loudly rather than starting up mute.
-      # (The BOT_TOKEN that used to sit here was both a live-looking secret and a fiction:
-      # nothing in src/ has ever read a variable by that name.)
+      # Telegram API credentials for the userbot account. Placeholders on purpose: the
+      # real values are set on the stack in Portainer and must never land in git.
+      # src/config.py exits 1 with "TG_API_ID and TG_API_HASH must be set" when either is
+      # missing.
       TG_API_ID: ${TG_API_ID}
       TG_API_HASH: ${TG_API_HASH}
     logging:
@@ -54,16 +39,8 @@ services:
         max-file: 5
         max-size: 10m
     labels:
-      # Read by Portainer's own image updater, which polls the registry and redeploys the
-      # container when :latest moves. This is the other end of the publishing workflow, and
-      # the reason that workflow has no `pull_request` trigger.
-      # The label carries watchtower's name and is nonetheless read by PORTAINER — that is
-      # correct, not a leftover to be tidied up. Watchtower was retired on 10.08.2026 and
-      # removed from all three docker hosts (island, nebula, borneo); the fleet runs the
-      # native `ContainerAutomation.AutoUpdate` in the Portainer fork instead, and that
-      # updater understands both its own `io.portainer.update.enable` and watchtower's
-      # `com.centurylinklabs.watchtower.enable`, which is why nothing had to be re-labelled.
-      # QUOTED on purpose, and quoted on the stack too: docker labels are strings, and a
-      # bare `true` here is a YAML boolean that compose has to coerce. Keeping the quotes
-      # is what makes this file and the deployed copy compare equal by eye.
+      # Read by Portainer's own image updater (it honours watchtower's label as well as
+      # `io.portainer.update.enable`), which redeploys the container when :latest moves —
+      # the reason the publishing workflow has no `pull_request` trigger.
+      # Quoted, as on the stack: docker labels are strings, a bare `true` is a YAML boolean.
       com.centurylinklabs.watchtower.enable: "true"

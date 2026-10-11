@@ -6,7 +6,7 @@ UK Inline Watcher
 Выбирает для пользователя "статью дня" по inline-запросу.
 
 Алгоритм детерминирован по дате и user_id (без рандома):
-1. day_hash   = sha256(utc_midnight_unix_ts)
+1. day_hash   = sha256(local_midnight_unix_ts)
 2. user_hash  = sha256(user.id)
 3. seed       = xor_distance(day_hash, user_hash)
 4. Для каждой статьи считаем article_hash = sha256(название_статьи)

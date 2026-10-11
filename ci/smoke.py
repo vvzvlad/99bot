@@ -1,64 +1,28 @@
 """Smoke gate for the 99bot image, run on the CI runner against an already-built image.
 
-Unlike the gates in the sibling repos, this one runs OUTSIDE the image: it is a plain
-`python3 ci/smoke.py` on the runner that drives `docker run` against the tag it is given in
-$SMOKE_IMAGE. It has to be outside, because two of the four checks are about the container
-itself — how the image behaves with no environment at all, and what its declared CMD is —
-and neither question can be answered from a process already running inside it.
+It runs OUTSIDE the image — `python3 ci/smoke.py` on the runner, driving `docker run`
+against $SMOKE_IMAGE — because two checks concern the container itself (behaviour with no
+environment, the declared CMD). The runner image ships `python3`, not `python`. Standard
+library only.
 
-The runner's job image (`docker.gitea.com/runner-images:ubuntu-latest`) ships
-/usr/bin/python3, so the interpreter this needs is there; note that it ships `python3` and
-NOT a bare `python`, which is why both workflows invoke it as `python3 ci/smoke.py`.
-Nothing beyond the standard library is imported here.
+Nothing here logs in or holds a credential. Check (d) does reach Telegram (`start()` opens
+a TCP connection), but its marker is logged before the client is constructed, so the
+verdict never depends on the network; the fake credentials guarantee the connection gets
+nowhere.
 
-What this gate can be, and what it cannot
------------------------------------------
-There is no test suite in this repo, so this is the only thing standing between
-`docker build` and the :latest tag production follows. What it can decide without a real
-Telegram account is bounded, and the bound is worth stating plainly: NOTHING here logs in
-and nothing here holds a credential. The bot is a Kurigram userbot whose session file
-lives on a volume on nebula, and a check that needed that session could not run on a pull
-request at all.
+Checks:
+* (a) the missing-environment guard fires: `config.get_settings()` prints one line and
+  calls `os._exit(1)`; with `restart: always` that line is the only sign of a stack that
+  lost TG_API_ID;
+* (b) the Kurigram API surface the handlers use still exists — imported symbols, called
+  methods, and every `register_handler` run against a real `pyrogram.Client`.
+  requirements.txt pins nothing from above, so every rebuild takes the newest Kurigram,
+  and a renamed symbol inside a decorator only breaks at registration time;
+* (c) the image's declared command and the file it names agree;
+* (d) the real CMD, started with fake credentials, logs its first line.
 
-Reaching Telegram is a separate question from logging in, and the honest answer is that
-one check does reach it: check (d) starts the image's real CMD, and `main()` goes on to
-`await tg_client.start()`, which is `Client.connect()`, which opens a TCP connection to a
-Telegram data centre. That is NOT a flake risk, and the reason is worth spelling out
-rather than glossing over: the marker check (d) waits for is logged by `main()` BEFORE the
-client is even constructed, so the verdict is already taken by the time anything touches
-the network. Telegram being unreachable, or the container dying afterwards in any manner
-whatsoever, cannot redden this gate. The obviously fake credentials below are what
-guarantees that connection gets nowhere beyond that.
-
-What is genuinely decidable, and what each check is actually FOR:
-
-* the missing-environment guard fires (check a). `config.get_settings()` prints one line
-  and calls `os._exit(1)`, and a deployment that forgot a variable must die LOUDLY rather
-  than quietly: production's policy is `restart: always`, so it will be restarted either
-  way, and that one line is the only thing separating "somebody dropped TG_API_ID out of
-  the stack" from a bot that merely has nothing to say;
-* the whole Kurigram API surface the handlers use still exists — the symbols they import,
-  the runtime methods they call, and every `register_handler` function runs against a
-  real `pyrogram.Client` (check b). This is the reason this file exists at all:
-  requirements.txt pins nothing that would hold a release back — Kurigram, TgCrypto,
-  uvloop and python-dotenv are bare names, and Pillow carries a `>=10.0.0` floor, which
-  bounds nothing from above — so every rebuild resolves the newest release, and the way
-  that breaks is a renamed or removed symbol somewhere inside a decorator that is only
-  evaluated at registration time, or a renamed method that nothing notices until a user
-  triggers the handler that calls it;
-* the image's declared command and the file it names agree (check c);
-* the real CMD, started with fake credentials, gets far enough to log its first line
-  (check d) — which proves the whole import chain and logging setup work under the command
-  production actually runs, not just under a probe we wrote.
-
-Two properties matter and are easy to lose, so they are stated where they can be checked:
-
-* Failures leave through SystemExit, never `assert`. Asserts vanish under PYTHONOPTIMIZE=1,
-  which would silently turn this gate permanently green.
-* Every check runs before anything is reported, so one run shows the full extent of the
-  breakage instead of only the first broken thing. A check that CANNOT run reports itself
-  as FAILED; it is never quietly skipped, which is the classic way a gate keeps reporting
-  success while proving less and less.
+Failures leave through SystemExit, never `assert` (asserts vanish under PYTHONOPTIMIZE=1).
+Every check runs before anything is reported, and a check that cannot run reports FAILED.
 """
 
 import json
@@ -70,23 +34,14 @@ import time
 # The tag to test. Required rather than defaulted: a default would let a mistyped `env:`
 # block in a workflow silently gate some other image that happens to be on the daemon.
 IMAGE_ENV = "SMOKE_IMAGE"
-# Base name for every container this gate starts. The workflows put the run id in it,
-# because cirunner-hatbox has a single docker daemon shared by every repository in the
-# fleet and two concurrent runs must not collide on a name.
-# Required, exactly like the tag above, and for two reasons that both end in silence
-# rather than in an error — see the message in main() where it is enforced.
+# Base name for every container this gate starts. The workflows put the run id in it so
+# concurrent runs on the shared runner daemon do not collide. Required, see main().
 NAME_ENV = "SMOKE_NAME"
 
-# The two short-lived containers are named too, not left to docker's random name generator,
-# and the reason is the one case that matters: `--rm` fires when a container EXITS, and a
-# container that hangs never does. `subprocess` hitting its timeout kills the docker CLIENT
-# on the runner; the container it started stays behind on the shared daemon, running. If it
-# had no name nobody could ever remove it — not remove_container() here, not the workflow's
-# `if: always()` step, because neither would know what to remove — and it would go on
-# pinning the image, so the `docker rmi` at the end of the job would fail too, be swallowed
-# by its `|| true`, and leave both a container and a few hundred MB of image on the daemon
-# the whole fleet shares. With a derived name both are removable by anyone who knows
-# $SMOKE_NAME, which is exactly what the workflows do.
+# The short-lived `--rm` containers are named too: `--rm` fires only when a container
+# exits, and a subprocess timeout kills the docker client, not the container. A derived
+# name lets this script and the workflows' cleanup step remove a hung one (which would
+# otherwise also pin the image). Kept in step with the suffix list in both workflows.
 GUARD_SUFFIX = "-guard"
 PROBE_SUFFIX = "-probe"
 
@@ -142,19 +97,14 @@ BOOT_MARKER = "Starting Telegram Chat Manager Bot"
 # script.
 PROBE_MARKER = "99bot smoke probe ok"
 
-# Bounds. Every docker call gets one, because a gate that hangs is worse than a gate that
-# fails: it holds a slot on a runner the whole fleet queues for until the step timeout
-# kills it, and a killed step never runs its cleanup.
-# The numbers are wildly generous against the real cost — a container of this image starts
-# and imports Kurigram in a couple of seconds — and are sized for a shared runner under
-# load right after a build. Their worst-case SUM is what the smoke step's `timeout-minutes`
-# in both workflows has to exceed, so it is spelled out here, in the order the calls
-# actually happen:
+# Bounds for every docker call: a hung gate holds a shared runner slot until the step
+# timeout kills it, and a killed step skips its cleanup. Generous against the real cost
+# (a couple of seconds). The worst-case sum must stay under the smoke step's
+# `timeout-minutes` (10) in both workflows:
 #   30 (inspect) + 30 (rm) + 90 (guard) + 30 (rm) + 120 (probe) + 30 (rm) + 60 (run -d)
-#   + 45 (boot poll) + 30 (rm) = 465 s, a little under 8 minutes. Both workflows allow 10.
-# Three of those `rm`s are the pre-run cleanups: every container this gate starts is
-# removed by name before it is started, so a re-run from the UI — which keeps the same run
-# id, hence the same $SMOKE_NAME — cannot die on "name already in use".
+#   + 45 (boot poll) + 30 (rm) = 465 s.
+# Three of those `rm`s are pre-run cleanups: a re-run from the UI keeps the run id, hence
+# the same $SMOKE_NAME, and must not die on "name already in use".
 GUARD_TIMEOUT = 90
 PROBE_TIMEOUT = 120
 INSPECT_TIMEOUT = 30
@@ -175,26 +125,13 @@ BOOT_PAUSE = 0.5
 EXCERPT_CHARS = 4000
 
 
-# The script fed to `python -u -` inside a container of the image under test. It lives here
-# as a string rather than as a second file so that this gate stays one artifact: the
-# workflows already pass it nothing but an image tag, and a second file is a second thing
-# to forget to copy when this repo's CI is cloned into the next one.
+# The script fed to `python -u -` inside a container of the image under test, kept as a
+# string so the gate stays one file. `-u`: stdout is a pipe, and a probe killed by
+# PROBE_TIMEOUT would otherwise lose every line it had printed.
 #
-# `-u` matters for the same reason PYTHONUNBUFFERED does above: this stdout is a pipe, and
-# a probe killed by PROBE_TIMEOUT would otherwise take every line it had already printed
-# down with it, in exactly the run whose output is the only thing left to diagnose from.
-#
-# FOUR CONSTANTS ARE DECLARED TWICE, here and again inside the probe, and they have to keep
-# agreeing: APP_DIR, SRC_DIR, MAIN_PATH and PROBE_MARKER. The duplication is deliberate.
-# Interpolating them into this string would mean either `.format()`, which cannot be used
-# on a body this full of `{}` format calls of its own, or `%`-substitution, which would
-# quietly turn the probe into a template that no longer runs as-is — and being able to
-# paste this block into a container by hand and have it work is most of why it is a plain
-# string. The cost is bounded and it falls on the safe side: a drifted APP_DIR or SRC_DIR
-# makes the probe report a wrong working directory or a missing sys.path entry and go RED,
-# and a drifted PROBE_MARKER makes check_probe() report a probe that never finished. All
-# four are false alarms, none is a false pass. Same rule as the suffixes in the workflows:
-# if you move one, move the other.
+# FOUR CONSTANTS ARE DECLARED TWICE, here and inside the probe, and must keep agreeing:
+# APP_DIR, SRC_DIR, MAIN_PATH and PROBE_MARKER. Not interpolated, so the probe stays
+# runnable by hand as-is; a drift makes the gate go red, never falsely green.
 PROBE = r'''
 """Runs INSIDE a container of the image under test, fed to `python -u -` over stdin.
 
@@ -1059,18 +996,9 @@ def main():
         raise SystemExit(1)
     name = os.environ.get(NAME_ENV)
     if not name:
-        # No default here either, and this one is worth spelling out because a default
-        # would not fail — it would work, quietly and wrongly, in two ways at once.
-        # First, the cleanup: the workflow's `if: always()` step removes `<run-id-name>`,
-        # `<...>-guard` and `<...>-probe`, and it builds those names from the SAME variable.
-        # A dropped or misspelled `env:` entry would leave this script naming its
-        # containers after the fallback while the cleanup step went looking for the run-id
-        # ones, found nothing, and swallowed the miss in its `|| true` — the gate stays
-        # green and the leak is permanent.
-        # Second, collisions: cirunner-hatbox runs one docker daemon for every repository
-        # in the fleet, so a constant fallback means two concurrent runs pick the SAME
-        # name — and remove_container() below would then delete the other run's live
-        # container out from under it.
+        # No default: the workflow's cleanup step builds its names from the same variable,
+        # so a fallback would leak containers silently, and on the shared daemon two
+        # concurrent runs would remove each other's containers.
         print("{} is not set: this gate names every container it starts after it, and a "
               "default would both hide containers from the workflow's cleanup step and "
               "make two concurrent runs collide on one name".format(NAME_ENV))
