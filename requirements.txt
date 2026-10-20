@@ -3,3 +3,8 @@ TgCrypto
 uvloop
 python-dotenv
 Pillow>=10.0.0
+numpy
+opencv-python-headless
+pdqhash
+torch
+torchvision

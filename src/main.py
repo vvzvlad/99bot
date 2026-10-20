@@ -24,6 +24,7 @@ from handlers import history_viewer
 from handlers import pidor_watcher
 from handlers import uk_inline_watcher
 from handlers import lena_watcher
+from handlers import repost_watcher
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,11 @@ async def main():
         pidor_watcher.register_handler(tg_client.client, group=0)
         uk_inline_watcher.register_handler(tg_client.client, group=0)
         lena_watcher.register_handler(tg_client.client, group=0)
+        repost_watcher.register_handler(tg_client.client, group=0)
         
         #service_cleaner.register_handler(tg_client.client, group=1)
+        
+        repost_watcher.start(tg_client.client)
         
         # Wait for shutdown signal
         await shutdown_event.wait()

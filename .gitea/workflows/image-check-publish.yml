@@ -81,8 +81,8 @@ jobs:
         fi
 
     - name: Build the Docker image
-      # Step-level timeouts are the ones act_runner enforces. A cold build is a couple of
-      # minutes: python:3.11-slim plus manylinux wheels, nothing compiled.
+      # Step-level timeouts are the ones act_runner enforces. A cold build pulls the CPU
+      # build of torch and the SSCD model and compiles pdqhash, which has no wheels.
       timeout-minutes: 20
       env:
         # Through the environment, not interpolated. `$TAGS` is unquoted below on purpose:

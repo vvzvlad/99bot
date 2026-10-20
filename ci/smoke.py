@@ -161,7 +161,7 @@ decorator ever touches, so a renamed `reply_text` or `get_chat_history` would sa
 everything above and only surface when a user triggered it in production.
 
 Which modules to check is itself checked, rather than being taken on trust from the list
-below: the package is enumerated with pkgutil and compared against it, because a tenth
+below: the package is enumerated with pkgutil and compared against it, because an eleventh
 handler that nobody added to that list is a hole this gate would neither cover nor
 mention.
 """
@@ -197,7 +197,7 @@ SYMBOLS = [
     ("uvloop", "EventLoopPolicy"),
     ("pyrogram", "Client"),
     ("pyrogram", "filters"),
-    # The six filters the handlers combine with & and |. They are attributes of a
+    # The eight filters the handlers combine with & and |. They are attributes of a
     # module, so a rename is an AttributeError inside a decorator at registration time —
     # invisible to anything that only imports.
     ("pyrogram.filters", "command"),
@@ -206,6 +206,8 @@ SYMBOLS = [
     ("pyrogram.filters", "private"),
     ("pyrogram.filters", "user"),
     ("pyrogram.filters", "service"),
+    ("pyrogram.filters", "chat"),
+    ("pyrogram.filters", "photo"),
     ("pyrogram.enums", "MessageServiceType"),
     ("pyrogram.enums", "ChatMemberStatus"),
     # The two service-message kinds the watchers dispatch on, reached as a dotted path
@@ -214,6 +216,8 @@ SYMBOLS = [
     # would simply stop matching, and the bot would quietly do nothing forever.
     ("pyrogram.enums", "MessageServiceType.NEW_CHAT_TITLE"),
     ("pyrogram.enums", "MessageServiceType.NEW_CHAT_PHOTO"),
+    ("pyrogram.enums", "ParseMode"),
+    ("pyrogram.enums", "ParseMode.MARKDOWN"),
     ("pyrogram.errors", "ChatAdminRequired"),
     ("pyrogram.errors", "ChatNotModified"),
     ("pyrogram.errors", "PhotoInvalidDimensions"),
@@ -223,6 +227,7 @@ SYMBOLS = [
     ("pyrogram.types", "InlineQuery"),
     ("pyrogram.types", "InlineQueryResultArticle"),
     ("pyrogram.types", "InputTextMessageContent"),
+    ("pyrogram.types", "LinkPreviewOptions"),
     ("pyrogram.handlers", "DisconnectHandler"),
     # `from PIL import Image` on a submodule is an import, not an attribute lookup, which
     # is why this is checked as a module first and then for the two constructors
@@ -231,7 +236,31 @@ SYMBOLS = [
     ("PIL.Image", None),
     ("PIL.Image", "open"),
     ("PIL.Image", "new"),
-]
+    # What repost_detector does with the opened picture before hashing it.
+    ("PIL.Image", "Image.draft"),
+    ("PIL.Image", "Image.convert"),
+    ("PIL.Image", "Image.thumbnail"),
+    # The repost detector. torch and torchvision are imported lazily by the bot, at startup
+    # rather than at import, so these rows are the only thing that loads them here.
+    ("pdqhash", "compute"),
+    ("torch", "jit.load"),
+    ("torch", "no_grad"),
+    ("torchvision.transforms", "Compose"),
+    ("torchvision.transforms", "Resize"),
+    ("torchvision.transforms", "ToTensor"),
+    ("torchvision.transforms", "Normalize"),
+] + [("numpy", name) for name in (
+    "abs", "arctan2", "argsort", "array", "asarray", "ascontiguousarray", "bitwise_count",
+    "concatenate", "degrees", "dtype", "float32", "frombuffer", "fromfile", "full", "hypot",
+    "int16", "maximum", "maximum.at", "median", "nonzero", "ones", "packbits", "uint64",
+    "uint8", "zeros",
+)] + [("cv2", name) for name in (
+    "BFMatcher", "BFMatcher.knnMatch", "BORDER_CONSTANT", "CC_STAT_AREA", "COLOR_BGR2GRAY",
+    "Canny", "GaussianBlur", "IMREAD_COLOR", "INTER_AREA", "INTER_LINEAR", "INTER_NEAREST",
+    "MORPH_OPEN", "RANSAC", "SIFT.detectAndCompute", "SIFT_create",
+    "connectedComponentsWithStats", "cvtColor", "dilate", "erode", "estimateAffinePartial2D",
+    "imread", "invertAffineTransform", "morphologyEx", "resize", "warpAffine",
+)]
 
 # The Kurigram methods src/ CALLS, as opposed to the symbols it imports. A release that
 # renames one of these breaks the bot the first time it is reached — for most of them, the
@@ -299,7 +328,7 @@ INLINE_QUERY_METHODS = [
 
 # Every module in src/handlers/, all of them checked, including service_cleaner, whose
 # registration is commented out in main.py today: it is imported there unconditionally, so
-# it breaks the bot's startup exactly like the other eight, and the day somebody
+# it breaks the bot's startup exactly like the other nine, and the day somebody
 # uncomments that line the gate should already have been covering it.
 HANDLER_MODULES = [
     "rename_watcher",
@@ -311,6 +340,7 @@ HANDLER_MODULES = [
     "pidor_watcher",
     "uk_inline_watcher",
     "lena_watcher",
+    "repost_watcher",
 ]
 
 
@@ -651,7 +681,7 @@ def main():
 
     # HANDLER_MODULES is written by hand, and a hand-written list of files stops matching
     # its directory the moment somebody adds one. Nothing below would say so: an unlisted
-    # tenth handler is simply never imported, never registered and never mentioned, so the
+    # eleventh handler is simply never imported, never registered and never mentioned, so the
     # gate keeps reporting the same confident green while covering less. This row is what
     # turns that silent loss of coverage into a failure — the same principle as everywhere
     # else in this file, that a check which cannot be run counts as a check that failed.
