@@ -287,6 +287,7 @@ CLIENT_METHODS = [
     "get_me",
     "get_chat_members",
     "get_chat_history",
+    "get_media_group",
     "send_message",
     "download_media",
     "set_chat_photo",

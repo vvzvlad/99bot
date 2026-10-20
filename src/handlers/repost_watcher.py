@@ -21,6 +21,7 @@ from repost_detector import ROW, RepostIndex, features, load_model
 logger = logging.getLogger(__name__)
 
 CHAT_ID = -1001833941803
+LINK = "https://t.me/c/1833941803/{}"
 DATA_DIR = os.path.join(os.path.abspath(get_settings()["session_path"]), "repost")
 PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
 INDEX_PATH = os.path.join(DATA_DIR, "index.bin")
@@ -50,8 +51,8 @@ def _check(path, msg_id, author, date):
     return pdq, sscd, _index.first_repost(path, msg_id, author, date, pdq, sscd)
 
 
-async def _add_photo(client: Client, message: Message, reply: bool):
-    """Download one photo message and append it to the index; with reply, answer when it is a repost."""
+async def _add_photo(client: Client, message: Message, check: bool):
+    """Download one photo message and append it to the index; with check, return the original it re-posts."""
     file = f"{message.id}.jpg"
     path = os.path.join(PHOTOS_DIR, file)
     if message.from_user:
@@ -62,18 +63,13 @@ async def _add_photo(client: Client, message: Message, reply: bool):
         author = 0
     date = int(message.date.timestamp())
     await client.download_media(message, file_name=path)
-    if reply:
+    if check:
         pdq, sscd, old_id = await asyncio.to_thread(_check, path, message.id, author, date)
     else:
         pdq, sscd = await asyncio.to_thread(features, path)
         old_id = None
     _index.append(np.array([(message.id, author, date, pdq, sscd, file)], ROW))
-    if old_id is not None:
-        await message.reply_text(
-            f"[это уже было](https://t.me/c/1833941803/{old_id})",
-            parse_mode=ParseMode.MARKDOWN,
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
-        )
+    return old_id
 
 
 async def _startup(client: Client):
@@ -92,7 +88,7 @@ async def _startup(client: Client):
                 if not message.photo:
                     continue
                 try:
-                    await _add_photo(client, message, reply=False)
+                    await _add_photo(client, message, check=False)
                     count += 1
                 except Exception as e:
                     logger.error(f"Error in repost backfill for message {message.id}: {str(e)}", exc_info=True)
@@ -106,7 +102,29 @@ async def _on_photo(client: Client, message: Message):
         try:
             if message.id <= _index.max_id:
                 return
-            await _add_photo(client, message, reply=True)
+            # an album comes as one update per photo: the first one to get here takes the whole album and
+            # answers once, the others find their photos already indexed and return above
+            album = [message]
+            if message.media_group_id:
+                album = sorted((m for m in await client.get_media_group(CHAT_ID, message.id)
+                                if m.photo and m.id > _index.max_id), key=lambda m: m.id)
+            hits = []
+            for m in album:
+                try:
+                    old_id = await _add_photo(client, m, check=True)
+                except Exception as e:
+                    logger.error(f"Error in repost watcher for message {m.id}: {str(e)}", exc_info=True)
+                    continue
+                if old_id is not None:
+                    hits.append((m, old_id))
+            if hits:
+                originals = list(dict.fromkeys(old_id for _, old_id in hits))
+                if len(originals) == 1:
+                    text = f"[это уже было]({LINK.format(originals[0])})"
+                else:
+                    text = "это уже было: " + ", ".join(f"[{i}]({LINK.format(o)})" for i, o in enumerate(originals, 1))
+                await hits[0][0].reply_text(text, parse_mode=ParseMode.MARKDOWN,
+                                            link_preview_options=LinkPreviewOptions(is_disabled=True))
         except Exception as e:
             logger.error(f"Error in repost watcher for message {message.id}: {str(e)}", exc_info=True)
 
