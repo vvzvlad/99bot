@@ -14,7 +14,9 @@ Stage 2 (per candidate): align the two images (SIFT + RANSAC similarity; a pair 
   - rotation (a rotated picture is an edit).
 
 RepostIndex keeps every photo seen so far on disk and runs both stages for a new one, the way replay.py
-replays the chat history. Nothing here imports the bot, so the module runs standalone too.
+replays the chat history. RepostRating keeps, for every index row, whether the picture counts in its author's
+rating (camera photos do not) and whether it is a repost. Nothing here imports the bot, so the module runs
+standalone too.
 """
 import logging
 import os
@@ -177,6 +179,8 @@ MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 # one record per photo message, appended to the index file in message order
 ROW = np.dtype([('id', '<i8'), ('author', '<i8'), ('date', '<i8'), ('pdq', '<u8', (4,)), ('sscd', '<f4', (512,)),
                 ('file', 'S64')])
+# one record per index row, in the same order, appended to the rating file
+RATE = np.dtype([('id', '<i8'), ('author', '<i8'), ('counted', 'u1'), ('repost', 'u1')])
 
 _model = _tf = None
 
@@ -274,3 +278,54 @@ class RepostIndex:
         logger.info(f"photo {msg_id}: hit {old_id}{' (same author re-sent it, no reply)' if resend else ''}, "
                     f"{tried}/{len(cand)} candidates tried in {time.monotonic() - t:.1f}s")
         return None if resend else old_id
+
+
+def is_photo_aspect(w, h):
+    """True when the picture has a camera's proportions, 4:3 or 16:9 within 1 %."""
+    r = max(w, h) / min(w, h)
+    return any(abs(r / a - 1) <= 0.01 for a in (4 / 3, 16 / 9))
+
+
+class RepostRating:
+    """Per index row: whether the picture counts in the rating and whether it is a repost (RATE records in rating_path)."""
+
+    def __init__(self, rating_path):
+        self.rating_path = rating_path
+        rows = np.zeros(0, RATE)
+        if os.path.exists(rating_path):
+            # a trailing record cut short by a crash is dropped, so the next append starts on a record boundary
+            n = os.path.getsize(rating_path) // RATE.itemsize
+            os.truncate(rating_path, n * RATE.itemsize)
+            rows = np.fromfile(rating_path, RATE, count=n)
+        self.ids = np.ascontiguousarray(rows['id'])
+        self.authors = np.ascontiguousarray(rows['author'])
+        self.counted = np.ascontiguousarray(rows['counted'])
+        self.repost = np.ascontiguousarray(rows['repost'])
+
+    @property
+    def max_id(self):
+        """Largest message id in the rating, 0 when it is empty."""
+        return int(self.ids.max()) if len(self.ids) else 0
+
+    def append(self, row):
+        """Append one record (a RATE array of shape (1,)) to the file and to the arrays."""
+        with open(self.rating_path, "ab") as f:
+            f.write(row.tobytes())
+            f.flush()
+        self.ids = np.concatenate([self.ids, row['id']])
+        self.authors = np.concatenate([self.authors, row['author']])
+        self.counted = np.concatenate([self.counted, row['counted']])
+        self.repost = np.concatenate([self.repost, row['repost']])
+
+    def stats(self, author):
+        """(n, r) of one author: counted pictures and how many of them are reposts."""
+        mine = (self.authors == author) & (self.counted > 0)
+        return int(mine.sum()), int((mine & (self.repost > 0)).sum())
+
+    def table(self):
+        """{author: (n, r)} for every author with a counted picture."""
+        c = self.counted > 0
+        authors, inv = np.unique(self.authors[c], return_inverse=True)
+        n = np.bincount(inv, minlength=len(authors))
+        r = np.bincount(inv, weights=self.repost[c] > 0, minlength=len(authors)).astype(np.int64)
+        return {int(a): (int(x), int(y)) for a, x, y in zip(authors, n, r)}
