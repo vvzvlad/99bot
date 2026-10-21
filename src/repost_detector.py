@@ -206,6 +206,14 @@ def features(path):
     return pdq_hash(path)[0], embed(path)
 
 
+def _same_file(a, b):
+    """True when the two files are byte for byte identical."""
+    if os.path.getsize(a) != os.path.getsize(b):
+        return False
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        return fa.read() == fb.read()
+
+
 class RepostIndex:
     """Photos seen so far: ROW records in index_path, the photo files themselves in photos_dir."""
 
@@ -245,8 +253,9 @@ class RepostIndex:
     def first_repost(self, path, msg_id, author, date, pdq, sscd):
         """Message id of the earliest photo that the photo at path re-posts, or None.
 
-        Candidates are earlier photos close by PDQ or SSCD; stage 2 runs on them oldest first and stops at the first
-        repost. None also when that first hit is the same author re-sending it within SAME_AUTHOR_GAP seconds.
+        Candidates are earlier photos close by PDQ or SSCD, tried oldest first: a byte-identical file is a repost
+        outright, any other goes through stage 2, and the walk stops at the first repost. None also when that first
+        hit is the same author re-sending it within SAME_AUTHOR_GAP seconds.
         """
         t = time.monotonic()
         c = (self.ids < msg_id) & ((pdq_distance(pdq, self.pdq) <= PDQ_MAX) | (self.sscd @ sscd >= SSCD_MIN))
@@ -255,7 +264,9 @@ class RepostIndex:
         hit, tried = None, 0
         for j in cand:
             tried += 1
-            if compare(path, os.path.join(self.photos_dir, self.files[j].decode()))["repost"]:
+            old = os.path.join(self.photos_dir, self.files[j].decode())
+            # the same file sent again (a forward) is a repost without stage 2, which also cannot align a flat picture
+            if _same_file(path, old) or compare(path, old)["repost"]:
                 hit = j
                 break
         old_id = None if hit is None else int(self.ids[hit])
