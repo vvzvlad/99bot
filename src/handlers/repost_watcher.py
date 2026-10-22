@@ -3,7 +3,7 @@
 
 """
 Repost Watcher Plugin
-Replies "это уже было" to a photo in the chat when it repeats an earlier one
+Replies "это уже было" (or another phrase at random) to a photo in the chat when it repeats an earlier one
 (repost_detector tells a re-post of the same picture from a derivative meme),
 or a jab at the poster's memory when every original is their own picture,
 keeps every author's rating (1000 / percent of reposts among their pictures)
@@ -37,7 +37,16 @@ RATING_PATH = os.path.join(DATA_DIR, "rating.bin")
 LAST_SEEN_PATH = os.path.join(DATA_DIR, "last_seen.json")
 RATING_MIN_PICTURES = 50      # /rating leaves out authors with fewer counted pictures
 RATING_ACTIVE_DAYS = 30       # ...and those who wrote nothing in the chat for longer
-# said instead of "это уже было" when every original is the poster's own picture
+# the first line of the reply to a repost of someone else's picture, one at random
+REPOST = (
+    "это уже было",
+    "этот мем уже видели все, кроме тебя",
+    "у этого мема уже внуки",
+    "этот мем уже выплатил ипотеку",
+    "этот мем помнит доллар по 30",
+    "мы над этим уже поржали, спасибо",
+)
+# ...and to a repost when every original is the poster's own picture
 ALZHEIMER = (
     "альцгеймер подкрался незаметно",
     "дед, ты это уже постил",
@@ -212,7 +221,7 @@ async def _on_photo(client: Client, message: Message):
                 originals = list(dict.fromkeys(old_id for _, old_id in hits))
                 author = _author(message)
                 own = all(int(_index.authors[_index.ids == o][0]) == author for o in originals)
-                head = random.choice(ALZHEIMER) if own else "это уже было"
+                head = random.choice(ALZHEIMER if own else REPOST)
                 if len(originals) == 1:
                     text = f"[{head}]({LINK.format(originals[0])})"
                 else:
