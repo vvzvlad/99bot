@@ -5,6 +5,7 @@
 Repost Watcher Plugin
 Replies "это уже было" to a photo in the chat when it repeats an earlier one
 (repost_detector tells a re-post of the same picture from a derivative meme),
+or a jab at the poster's memory when every original is their own picture,
 keeps every author's rating (1000 / percent of reposts among their pictures)
 and shows the rating of the active members on /rating.
 """
@@ -14,6 +15,7 @@ import json
 import logging
 import math
 import os
+import random
 import time
 import numpy as np
 from PIL import Image
@@ -35,6 +37,14 @@ RATING_PATH = os.path.join(DATA_DIR, "rating.bin")
 LAST_SEEN_PATH = os.path.join(DATA_DIR, "last_seen.json")
 RATING_MIN_PICTURES = 50      # /rating leaves out authors with fewer counted pictures
 RATING_ACTIVE_DAYS = 30       # ...and those who wrote nothing in the chat for longer
+# said instead of "это уже было" when every original is the poster's own picture
+ALZHEIMER = (
+    "альцгеймер подкрался незаметно",
+    "дед, ты это уже постил",
+    "и постед ит эгейн эворд",
+    "таблетки от склероза принять не забыл?",
+    "память как у золотой рыбки: ты сам это уже постил",
+)
 
 # serialises the startup, every photo, every last_seen update and /rating, so rows are appended in message order
 _lock = asyncio.Lock()
@@ -200,19 +210,24 @@ async def _on_photo(client: Client, message: Message):
                     counted_hits += counted
             if hits:
                 originals = list(dict.fromkeys(old_id for _, old_id in hits))
+                author = _author(message)
+                own = all(int(_index.authors[_index.ids == o][0]) == author for o in originals)
+                head = random.choice(ALZHEIMER) if own else "это уже было"
                 if len(originals) == 1:
-                    text = f"[это уже было]({LINK.format(originals[0])})"
+                    text = f"[{head}]({LINK.format(originals[0])})"
                 else:
-                    text = "это уже было: " + ", ".join(f"[{i}]({LINK.format(o)})" for i, o in enumerate(originals, 1))
+                    # a dash after a phrase that may end in "?" or hold a colon itself
+                    sep = " — " if own else ": "
+                    text = f"{head}{sep}" + ", ".join(f"[{i}]({LINK.format(o)})" for i, o in enumerate(originals, 1))
                 if counted_hits:
                     # "before" leaves out only the reposted pictures, so new memes in the same album
                     # do not hide what the reposts cost
-                    n, r = _rating.stats(_author(message))
+                    n, r = _rating.stats(author)
                     before = _comma(_rating_value(n - counted_hits, r - counted_hits))
                     after = _comma(_rating_value(n, r))
+                    lead = "\nтвой рейтинг" if own else "\nты запостил баян, твой рейтинг"
                     # when every counted picture is a repost the rating stays at 10
-                    text += (f"\nты запостил баян, твой рейтинг: {after}" if before == after else
-                             f"\nты запостил баян, твой рейтинг понижен: {before} → {after}")
+                    text += f"{lead}: {after}" if before == after else f"{lead} понижен: {before} → {after}"
                 await hits[0][0].reply_text(text, parse_mode=ParseMode.MARKDOWN,
                                             link_preview_options=LinkPreviewOptions(is_disabled=True))
         except Exception as e:
