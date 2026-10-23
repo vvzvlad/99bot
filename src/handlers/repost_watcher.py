@@ -301,18 +301,25 @@ async def _on_rating(client: Client, message: Message):
 
 
 async def _on_st(message: Message):
-    """/st in reply to a picture: it and the pictures tied to it as reposts stop being reposts and counting."""
+    """/st in reply to a picture, or to the bot's answer to it: the picture and those tied to it as reposts stop counting."""
     async with _lock:
         try:
             target = message.reply_to_message
-            rows = np.nonzero(_index.ids == target.id)[0] if target and target.photo else ()
+            pic_id = None
+            if target and target.photo:
+                pic_id = target.id
+            elif target and target.outgoing:
+                # the bot's "это уже было" replies to the picture; only its own message tells this chat's id,
+                # reply_to_message_id of anyone else's may point into another chat
+                pic_id = target.reply_to_message_id
+            rows = np.nonzero(_index.ids == pic_id)[0] if pic_id else ()
             if len(rows):
                 tied = await asyncio.to_thread(_index.reposts_of, rows[0])
-                ids = [target.id, *(int(i) for i in _index.ids[tied])]
+                ids = [pic_id, *(int(i) for i in _index.ids[tied])]
                 _excluded.update(ids)
                 _save_excluded()
                 _rating.exclude(ids)
-                logger.info(f"/st on photo {target.id}: {len(ids)} pictures excluded")
+                logger.info(f"/st on photo {pic_id}: {len(ids)} pictures excluded")
             await message.delete()
         except Exception as e:
             logger.error(f"Error in repost exclusion for message {message.id}: {str(e)}", exc_info=True)
