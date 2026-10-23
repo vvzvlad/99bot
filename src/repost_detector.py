@@ -254,12 +254,13 @@ class RepostIndex:
         self.sscd = np.concatenate([self.sscd, row['sscd'].astype(np.float32)])
         self.files = np.concatenate([self.files, row['file']])
 
-    def first_repost(self, path, msg_id, author, date, pdq, sscd):
+    def first_repost(self, path, msg_id, author, date, pdq, sscd, excluded=()):
         """Message id of the earliest photo that the photo at path re-posts, or None.
 
         Candidates are earlier photos close by PDQ or SSCD, tried oldest first: a byte-identical file is a repost
         outright, any other goes through stage 2, and the walk stops at the first repost. None also when that first
-        hit is the same author re-sending it within SAME_AUTHOR_GAP seconds.
+        hit is the same author re-sending it within SAME_AUTHOR_GAP seconds, unless the hit is one of the excluded
+        message ids: that one is returned, so the caller can leave the photo out altogether.
         """
         t = time.monotonic()
         c = (self.ids < msg_id) & ((pdq_distance(pdq, self.pdq) <= PDQ_MAX) | (self.sscd @ sscd >= SSCD_MIN))
@@ -277,7 +278,24 @@ class RepostIndex:
         resend = hit is not None and self.authors[hit] == author and date - self.dates[hit] < SAME_AUTHOR_GAP
         logger.info(f"photo {msg_id}: hit {old_id}{' (same author re-sent it, no reply)' if resend else ''}, "
                     f"{tried}/{len(cand)} candidates tried in {time.monotonic() - t:.1f}s")
-        return None if resend else old_id
+        return None if resend and old_id not in excluded else old_id
+
+    def reposts_of(self, j):
+        """Rows tied to row j as a repost in either direction, judged as first_repost judges a pair.
+
+        Candidates are the other rows close by PDQ or SSCD; of each pair the newer photo is checked against the older
+        one. SAME_AUTHOR_GAP does not apply: this is about the picture, not about a reply.
+        """
+        c = (pdq_distance(self.pdq[j], self.pdq) <= PDQ_MAX) | (self.sscd @ self.sscd[j] >= SSCD_MIN)
+        c[j] = False
+        path = os.path.join(self.photos_dir, self.files[j].decode())
+        tied = []
+        for i in np.nonzero(c)[0]:
+            other = os.path.join(self.photos_dir, self.files[i].decode())
+            new, old = (other, path) if self.ids[i] > self.ids[j] else (path, other)
+            if _same_file(new, old) or compare(new, old)["repost"]:
+                tied.append(i)
+        return np.array(tied, np.int64)
 
 
 def is_photo_aspect(w, h):
@@ -316,6 +334,15 @@ class RepostRating:
         self.authors = np.concatenate([self.authors, row['author']])
         self.counted = np.concatenate([self.counted, row['counted']])
         self.repost = np.concatenate([self.repost, row['repost']])
+
+    def exclude(self, ids):
+        """Stop counting the rows of these message ids: counted=0 in memory and, byte by byte, in rating_path."""
+        rows = np.nonzero(np.isin(self.ids, ids) & (self.counted > 0))[0]
+        self.counted[rows] = 0
+        with open(self.rating_path, "r+b") as f:
+            for i in rows:
+                f.seek(i * RATE.itemsize + RATE.fields['counted'][1])
+                f.write(b"\x00")
 
     def stats(self, author):
         """(n, r) of one author: counted pictures and how many of them are reposts."""

@@ -6,8 +6,9 @@ Repost Watcher Plugin
 Replies "это уже было" (or another phrase at random) to a photo in the chat when it repeats an earlier one
 (repost_detector tells a re-post of the same picture from a derivative meme),
 or a jab at the poster's memory when every original is their own picture,
-keeps every author's rating (1000 / percent of reposts among their pictures)
-and shows the rating of the active members on /rating.
+keeps every author's rating (1000 / percent of reposts among their pictures),
+shows the rating of the active members on /rating
+and takes a picture (a sticker sent as a photo) and its reposts out of both on /st.
 """
 
 import asyncio
@@ -35,6 +36,7 @@ PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
 INDEX_PATH = os.path.join(DATA_DIR, "index.bin")
 RATING_PATH = os.path.join(DATA_DIR, "rating.bin")
 LAST_SEEN_PATH = os.path.join(DATA_DIR, "last_seen.json")
+EXCLUDED_PATH = os.path.join(DATA_DIR, "excluded.json")
 RATING_MIN_PICTURES = 50      # /rating leaves out authors with fewer counted pictures
 RATING_ACTIVE_DAYS = 30       # ...and those who wrote nothing in the chat for longer
 # the first line of the reply to a repost of someone else's picture, one at random
@@ -63,6 +65,8 @@ _index = None
 _rating = None
 # {"max_id": last chat message id seen, "seen": {"<author>": unix time of their last message}}
 _last_seen = None
+# message ids of the pictures /st took out (stickers sent as photos): neither they nor their reposts are reposts
+_excluded = None
 
 
 def _spawn(coro):
@@ -79,8 +83,12 @@ def _open():
     if os.path.exists(LAST_SEEN_PATH):
         with open(LAST_SEEN_PATH, encoding="utf-8") as f:
             last_seen = json.load(f)
+    excluded = set()
+    if os.path.exists(EXCLUDED_PATH):
+        with open(EXCLUDED_PATH, encoding="utf-8") as f:
+            excluded = set(json.load(f))
     load_model()
-    return index, rating, last_seen
+    return index, rating, last_seen, excluded
 
 
 def _save_last_seen():
@@ -89,6 +97,14 @@ def _save_last_seen():
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(_last_seen, f)
     os.replace(tmp, LAST_SEEN_PATH)
+
+
+def _save_excluded():
+    # written whole, as last_seen is
+    tmp = EXCLUDED_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(sorted(_excluded), f)
+    os.replace(tmp, EXCLUDED_PATH)
 
 
 def _author(message: Message):
@@ -123,9 +139,16 @@ def _comma(x):
     return "∞" if math.isinf(x) else f"{x:.1f}".replace(".", ",")
 
 
+def _unless_excluded(old_id, counted):
+    """(old_id, counted) of a photo, or (None, False) when it re-posts an excluded picture: it does not count at all."""
+    if old_id in _excluded:
+        return None, False
+    return old_id, counted
+
+
 def _check(path, msg_id, author, date):
     pdq, sscd = features(path)
-    return pdq, sscd, _index.first_repost(path, msg_id, author, date, pdq, sscd)
+    return pdq, sscd, _index.first_repost(path, msg_id, author, date, pdq, sscd, _excluded)
 
 
 def _catch_up():
@@ -134,8 +157,10 @@ def _catch_up():
     for j in np.nonzero(_index.ids > _rating.max_id)[0]:
         path = os.path.join(PHOTOS_DIR, _index.files[j].decode())
         msg_id, author = int(_index.ids[j]), int(_index.authors[j])
-        old_id = _index.first_repost(path, msg_id, author, int(_index.dates[j]), _index.pdq[j], _index.sscd[j])
-        _rating.append(np.array([(msg_id, author, _counted(path), old_id is not None)], RATE))
+        old_id = _index.first_repost(path, msg_id, author, int(_index.dates[j]), _index.pdq[j], _index.sscd[j],
+                                     _excluded)
+        old_id, counted = _unless_excluded(old_id, _counted(path))
+        _rating.append(np.array([(msg_id, author, counted, old_id is not None)], RATE))
         count += 1
     return count
 
@@ -152,19 +177,19 @@ async def _add_photo(client: Client, message: Message):
     await client.download_media(message, file_name=path)
     pdq, sscd, old_id = await asyncio.to_thread(_check, path, message.id, author, date)
     _index.append(np.array([(message.id, author, date, pdq, sscd, file)], ROW))
-    counted = _counted(path)
+    old_id, counted = _unless_excluded(old_id, _counted(path))
     _rating.append(np.array([(message.id, author, counted, old_id is not None)], RATE))
     return old_id, counted
 
 
 async def _startup(client: Client):
     """Load the index, the rating, last_seen and the model, then take in what was posted while the bot was down."""
-    global _index, _rating, _last_seen
+    global _index, _rating, _last_seen, _excluded
     # the handlers are registered by now: what is posted from here on reaches them and gets its answer
     started = time.time()
     async with _lock:
         try:
-            _index, _rating, _last_seen = await asyncio.to_thread(_open)
+            _index, _rating, _last_seen, _excluded = await asyncio.to_thread(_open)
             logger.info(f"Repost index loaded: {len(_index.ids)} photos, max id {_index.max_id}; "
                         f"rating {len(_rating.ids)} rows; last seen max id {_last_seen['max_id']}")
             count = await asyncio.to_thread(_catch_up)
@@ -275,13 +300,31 @@ async def _on_rating(client: Client, message: Message):
             logger.error(f"Error in repost rating for message {message.id}: {str(e)}", exc_info=True)
 
 
+async def _on_st(message: Message):
+    """/st in reply to a picture: it and the pictures tied to it as reposts stop being reposts and counting."""
+    async with _lock:
+        try:
+            target = message.reply_to_message
+            rows = np.nonzero(_index.ids == target.id)[0] if target and target.photo else ()
+            if len(rows):
+                tied = await asyncio.to_thread(_index.reposts_of, rows[0])
+                ids = [target.id, *(int(i) for i in _index.ids[tied])]
+                _excluded.update(ids)
+                _save_excluded()
+                _rating.exclude(ids)
+                logger.info(f"/st on photo {target.id}: {len(ids)} pictures excluded")
+            await message.delete()
+        except Exception as e:
+            logger.error(f"Error in repost exclusion for message {message.id}: {str(e)}", exc_info=True)
+
+
 def start(client: Client):
     """Schedule the startup; called once after all handlers are registered."""
     _spawn(_startup(client))
 
 
 def register_handler(client: Client, group: int = 0):
-    """Register the photo and /rating handlers for the chat, and the last_seen tracker one group later"""
+    """Register the photo, /rating and /st handlers for the chat, and the last_seen tracker one group later"""
     @client.on_message(filters.chat(CHAT_ID) & filters.photo, group=group)
     async def repost_wrapper(client: Client, message: Message):
         # stage 2 may take minutes, so it must not hold a dispatcher worker
@@ -292,6 +335,13 @@ def register_handler(client: Client, group: int = 0):
     async def rating_wrapper(client: Client, message: Message):
         # waits for the lock, which a photo's stage 2 may hold for minutes
         _spawn(_on_rating(client, message))
+        await message.continue_propagation()
+
+    # text only: filters.command also matches a media caption, and the photo would be deleted with it
+    @client.on_message(filters.command("st") & filters.text & filters.chat(CHAT_ID), group=group)
+    async def st_wrapper(client: Client, message: Message):
+        # waits for the lock, as /rating does
+        _spawn(_on_st(message))
         await message.continue_propagation()
 
     # its own group, so it sees every message whatever the handlers of the photo group do with it;

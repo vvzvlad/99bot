@@ -253,8 +253,8 @@ SYMBOLS = [
 ] + [("numpy", name) for name in (
     "abs", "arctan2", "argsort", "array", "asarray", "ascontiguousarray", "bincount",
     "bitwise_count", "concatenate", "degrees", "dtype", "float32", "frombuffer", "fromfile",
-    "full", "hypot", "int16", "int64", "maximum", "maximum.at", "median", "nonzero", "ones",
-    "packbits", "uint64", "uint8", "unique", "zeros",
+    "full", "hypot", "int16", "int64", "isin", "maximum", "maximum.at", "median", "nonzero",
+    "ones", "packbits", "uint64", "uint8", "unique", "zeros",
 )] + [("cv2", name) for name in (
     "BFMatcher", "BFMatcher.knnMatch", "BORDER_CONSTANT", "CC_STAT_AREA", "COLOR_BGR2GRAY",
     "Canny", "GaussianBlur", "IMREAD_COLOR", "INTER_AREA", "INTER_LINEAR", "INTER_NEAREST",
