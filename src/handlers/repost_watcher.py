@@ -320,9 +320,7 @@ async def _on_st(message: Message):
                 _save_excluded()
                 _rating.exclude(ids)
                 logger.info(f"/st on photo {pic_id}: {len(ids)} pictures excluded")
-                # a reply to what /st answered, not to the command: that one is deleted right below
-                await target.reply_text("картинка исключена")
-            await message.delete()
+                await message.reply_text("картинка исключена")
         except Exception as e:
             logger.error(f"Error in repost exclusion for message {message.id}: {str(e)}", exc_info=True)
 
@@ -346,7 +344,7 @@ def register_handler(client: Client, group: int = 0):
         _spawn(_on_rating(client, message))
         await message.continue_propagation()
 
-    # text only: filters.command also matches a media caption, and the photo would be deleted with it
+    # text only: filters.command also matches a media caption, and a captioned photo is not a command
     @client.on_message(filters.command("st") & filters.text & filters.chat(CHAT_ID), group=group)
     async def st_wrapper(client: Client, message: Message):
         # waits for the lock, as /rating does
