@@ -320,6 +320,8 @@ async def _on_st(message: Message):
                 _save_excluded()
                 _rating.exclude(ids)
                 logger.info(f"/st on photo {pic_id}: {len(ids)} pictures excluded")
+                # a reply to what /st answered, not to the command: that one is deleted right below
+                await target.reply_text("картинка исключена")
             await message.delete()
         except Exception as e:
             logger.error(f"Error in repost exclusion for message {message.id}: {str(e)}", exc_info=True)
