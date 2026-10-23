@@ -3,7 +3,9 @@
 
 """
 Pidor Watcher Plugin
-Выбор "пидора дня" по команде /пидор на основе XOR-метрики хешей.
+Выбор "пидора дня" по команде /пидор и "красавчика дня" по команде /красавчик
+на основе XOR-метрики хешей. Красавчик считается тем же алгоритмом, но от
+хеша дня с солью, поэтому не зависит от пидора.
 
 Алгоритм (детерминирован по дате, не рандомный):
 1. day_hash  = sha256(str(unix_timestamp сегодняшней полуночи в часовом поясе приложения))
@@ -17,7 +19,7 @@ import hashlib
 import logging
 import random
 from datetime import date
-from typing import Dict, Tuple
+from typing import Dict, List, NamedTuple, Tuple
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
@@ -25,9 +27,9 @@ from config import now_in_app_timezone
 
 logger = logging.getLogger(__name__)
 
-# In-memory кэш: (chat_id, date) -> True означает, что тег уже был отправлен сегодня
+# In-memory кэш: (pick key, chat_id, date) -> True означает, что тег уже был отправлен сегодня
 # При первом вызове за день в данном чате — тегать (@username), при повторных — нет
-_announced: Dict[Tuple[int, date], bool] = {}
+_announced: Dict[Tuple[str, int, date], bool] = {}
 
 # Сообщения-интро (первый вызов за день)
 MESSAGES_INTRO = [
@@ -59,10 +61,65 @@ MESSAGES_RESULT = [
     ".∧＿∧ \n( ･ω･｡)つ━☆・*。 \n⊂  ノ    ・゜+. \nしーＪ   °。+ *´¨) \n         .· ´¸.·*´¨) \n          (¸.·´ (¸.·'* ☆ ВЖУХ И ТЫ ПИДОР, {}",
 ]
 
+MESSAGES_KRASAVCHIK_INTRO = [
+    "Запускаю поиск **красавчика дня**...",
+    "Так-так, кто у нас тут сегодня самый красивый...",
+    "Сверяюсь со звёздами...",
+    "Дамы и господа, барабанная дробь!",
+    "Секунду, натираю зеркало до блеска...",
+    "Итак... кто же сегодня **красавчик дня**?",
+]
 
-def get_day_hash() -> str:
+MESSAGES_KRASAVCHIK_RESULT = [
+    "Красавчик дня обыкновенный, 1шт. - {}",
+    "Анализ завершен. Ты красавчик, {}",
+    "Сегодня самый красивый в чате — {}",
+    "Поздравляю! Сегодня красавчик — {}",
+    "Ну ты и красавчик, {}",
+    "Звёзды сошлись: красавчик дня — {}",
+]
+
+
+class DailyPick(NamedTuple):
+    """One "of the day" command: its own salt, texts and cache namespace."""
+    key: str            # cache namespace and log label
+    commands: List[str]
+    salt: str           # mixed into the day hash; "" keeps the original pidor hash
+    intro: List[str]
+    result: List[str]   # "{}" is replaced with the winner mention
+    repeat: str         # reply to a repeated call the same day, "{}" is the plain name
+    not_found: str
+    error: str
+
+
+PIDOR = DailyPick(
+    key="pidor",
+    commands=["пидор", "pidor"],
+    salt="",
+    intro=MESSAGES_INTRO,
+    result=MESSAGES_RESULT,
+    repeat="🌈 Пидор дня — {}!",
+    not_found="😔 Не удалось определить пидора дня",
+    error="❌ Произошла ошибка при определении пидора дня",
+)
+
+KRASAVCHIK = DailyPick(
+    key="krasavchik",
+    commands=["красавчик", "krasavchik"],
+    salt="krasavchik:",
+    intro=MESSAGES_KRASAVCHIK_INTRO,
+    result=MESSAGES_KRASAVCHIK_RESULT,
+    repeat="😎 Красавчик дня — {}!",
+    not_found="😔 Не удалось определить красавчика дня",
+    error="❌ Произошла ошибка при определении красавчика дня",
+)
+
+
+def get_day_hash(salt: str = "") -> str:
     """
     Вернуть sha256-хеш текущего дня.
+
+    salt добавляется перед timestamp; пустая соль даёт исходный хеш дня для пидора.
 
     Берём полночь текущего дня в часовом поясе приложения, конвертируем в unix timestamp,
     превращаем в строку и хешируем.
@@ -73,7 +130,7 @@ def get_day_hash() -> str:
     now_local = now_in_app_timezone()
     midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     unix_ts = int(midnight_local.timestamp())
-    return hashlib.sha256(str(unix_ts).encode()).hexdigest()
+    return hashlib.sha256((salt + str(unix_ts)).encode()).hexdigest()
 
 
 def get_user_hash(user_id: int) -> str:
@@ -114,9 +171,9 @@ def xor_distance(hash_a: str, hash_b: str) -> int:
     return a ^ b
 
 
-def select_pidor(members: list, day_hash: str) -> object | None:
+def select_winner(members: list, day_hash: str) -> object | None:
     """
-    Выбрать "пидора дня" из списка участников.
+    Выбрать победителя дня из списка участников.
 
     Итерируем по участникам, вычисляем XOR-расстояние между хешем дня
     и хешем user.id каждого участника, возвращаем ближайшего.
@@ -138,14 +195,14 @@ def select_pidor(members: list, day_hash: str) -> object | None:
     return min(members, key=distance_for_member)
 
 
-async def handle_pidor(client: Client, message: Message):
+async def handle_daily(client: Client, message: Message, pick: DailyPick):
     """
-    Обработка команды /пидор или /pidor.
+    Обработка команды "of the day" (/пидор, /красавчик) для заданного pick.
 
     Процесс:
     1. Получить список участников чата через get_chat_members
     2. Отфильтровать ботов и удалённые аккаунты
-    3. Вычислить хеш дня
+    3. Вычислить хеш дня (с солью pick)
     4. Найти участника с минимальным XOR-расстоянием
     5. Отправить сообщение с результатом
     """
@@ -173,18 +230,18 @@ async def handle_pidor(client: Client, message: Message):
             return
 
         # Вычисляем хеш дня и выбираем победителя
-        day_hash = get_day_hash()
-        winner_member = select_pidor(members, day_hash)
+        day_hash = get_day_hash(pick.salt)
+        winner_member = select_winner(members, day_hash)
 
         if not winner_member:
-            await message.reply_text("😔 Не удалось определить пидора дня")
+            await message.reply_text(pick.not_found)
             return
 
         winner = winner_member.user
 
         # Определяем: первый ли это вызов сегодня в данном чате?
         today = now_in_app_timezone().date()
-        cache_key = (chat_id, today)
+        cache_key = (pick.key, chat_id, today)
         first_announcement = cache_key not in _announced
 
         if first_announcement:
@@ -196,8 +253,8 @@ async def handle_pidor(client: Client, message: Message):
                 last_name = winner.last_name or ""
                 tag_mention = f"{first_name} {last_name}".strip() or f"id:{winner.id}"
 
-            intro = random.choice(MESSAGES_INTRO)
-            result = random.choice(MESSAGES_RESULT).format(tag_mention)
+            intro = random.choice(pick.intro)
+            result = random.choice(pick.result).format(tag_mention)
 
             await client.send_message(chat_id, intro)
             await asyncio.sleep(2)
@@ -206,7 +263,7 @@ async def handle_pidor(client: Client, message: Message):
             # Записываем в кэш
             _announced[cache_key] = True
             # Очищаем устаревшие записи (даты до сегодня)
-            stale_keys = [k for k in _announced if k[1] < today]
+            stale_keys = [k for k in _announced if k[2] < today]
             for k in stale_keys:
                 del _announced[k]
         else:
@@ -216,27 +273,28 @@ async def handle_pidor(client: Client, message: Message):
             name = f"{first_name} {last_name}".strip()
             plain_mention = name if name else (winner.username or f"id:{winner.id}")
 
-            await message.reply_text(f"🌈 Пидор дня — {plain_mention}!")
+            await message.reply_text(pick.repeat.format(plain_mention))
 
         logger.info(
-            f"Pidor of the day in chat {chat_id}: user_id={winner.id}, "
+            f"{pick.key} of the day in chat {chat_id}: user_id={winner.id}, "
             f"username={winner.username}, from {len(members)} members"
         )
 
     except Exception as e:
-        logger.error(f"Error in pidor handler: {str(e)}", exc_info=True)
-        await message.reply_text("❌ Произошла ошибка при определении пидора дня")
+        logger.error(f"Error in {pick.key} handler: {str(e)}", exc_info=True)
+        await message.reply_text(pick.error)
 
 
 def register_handler(client: Client, group: int = 0):
-    """Регистрация обработчика команды /пидор и /pidor"""
+    """Регистрация обработчиков команд /пидор, /pidor, /красавчик и /krasavchik"""
 
-    @client.on_message(
-        filters.command(["пидор", "pidor"]) & filters.group,
-        group=group
-    )
-    async def pidor_wrapper(client: Client, message: Message):
-        await handle_pidor(client, message)
-        await message.continue_propagation()
+    for pick in (PIDOR, KRASAVCHIK):
+        @client.on_message(
+            filters.command(pick.commands) & filters.group,
+            group=group
+        )
+        async def daily_wrapper(client: Client, message: Message, pick: DailyPick = pick):
+            await handle_daily(client, message, pick)
+            await message.continue_propagation()
 
-    logger.info("Pidor watcher handler registered")
+    logger.info("Pidor watcher handlers registered")
