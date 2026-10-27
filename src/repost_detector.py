@@ -174,6 +174,7 @@ logger = logging.getLogger(__name__)
 
 SSCD_MIN = 0.6           # stage 1 extra: candidate if SSCD cosine >= this
 SAME_AUTHOR_GAP = 3600   # the same author re-sending within this many seconds is not "это уже было"
+NEAR_IDS = 10            # nor is a picture whose original is at most this many chat messages back: it is still in view
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "models", "sscd_disc_mixup.torchscript.pt")
 # one record per photo message, appended to the index file in message order
@@ -259,8 +260,9 @@ class RepostIndex:
 
         Candidates are earlier photos close by PDQ or SSCD, tried oldest first: a byte-identical file is a repost
         outright, any other goes through stage 2, and the walk stops at the first repost. None also when that first
-        hit is the same author re-sending it within SAME_AUTHOR_GAP seconds, unless the hit is one of the excluded
-        message ids: that one is returned, so the caller can leave the photo out altogether.
+        hit is the same author re-sending it within SAME_AUTHOR_GAP seconds, or is at most NEAR_IDS messages back
+        (then every later candidate is too), unless the hit is one of the excluded message ids: that one is returned,
+        so the caller can leave the photo out altogether.
         """
         t = time.monotonic()
         c = (self.ids < msg_id) & ((pdq_distance(pdq, self.pdq) <= PDQ_MAX) | (self.sscd @ sscd >= SSCD_MIN))
@@ -276,15 +278,17 @@ class RepostIndex:
                 break
         old_id = None if hit is None else int(self.ids[hit])
         resend = hit is not None and self.authors[hit] == author and date - self.dates[hit] < SAME_AUTHOR_GAP
-        logger.info(f"photo {msg_id}: hit {old_id}{' (same author re-sent it, no reply)' if resend else ''}, "
+        near = hit is not None and msg_id - old_id <= NEAR_IDS
+        note = ' (same author re-sent it, no reply)' if resend else ' (posted just above, no reply)' if near else ''
+        logger.info(f"photo {msg_id}: hit {old_id}{note}, "
                     f"{tried}/{len(cand)} candidates tried in {time.monotonic() - t:.1f}s")
-        return None if resend and old_id not in excluded else old_id
+        return None if (resend or near) and old_id not in excluded else old_id
 
     def reposts_of(self, j):
         """Rows tied to row j as a repost in either direction, judged as first_repost judges a pair.
 
         Candidates are the other rows close by PDQ or SSCD; of each pair the newer photo is checked against the older
-        one. SAME_AUTHOR_GAP does not apply: this is about the picture, not about a reply.
+        one. SAME_AUTHOR_GAP and NEAR_IDS do not apply: this is about the picture, not about a reply.
         """
         c = (pdq_distance(self.pdq[j], self.pdq) <= PDQ_MAX) | (self.sscd @ self.sscd[j] >= SSCD_MIN)
         c[j] = False
