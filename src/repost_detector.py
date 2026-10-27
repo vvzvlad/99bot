@@ -255,13 +255,14 @@ class RepostIndex:
         self.sscd = np.concatenate([self.sscd, row['sscd'].astype(np.float32)])
         self.files = np.concatenate([self.files, row['file']])
 
-    def first_repost(self, path, msg_id, author, date, pdq, sscd, excluded=()):
+    def first_repost(self, path, msg_id, author, date, pdq, sscd, excluded=(), reply_to=None):
         """Message id of the earliest photo that the photo at path re-posts, or None.
 
         Candidates are earlier photos close by PDQ or SSCD, tried oldest first: a byte-identical file is a repost
         outright, any other goes through stage 2, and the walk stops at the first repost. None also when that first
-        hit is the same author re-sending it within SAME_AUTHOR_GAP seconds, or is at most NEAR_IDS messages back
-        (then every later candidate is too), unless the hit is one of the excluded message ids: that one is returned,
+        hit is the same author re-sending it within SAME_AUTHOR_GAP seconds, is at most NEAR_IDS messages back (then
+        every later candidate is too), or when reply_to (the message of this chat this photo replies to) is that hit
+        or a later photo this one re-posts, unless the hit is one of the excluded message ids: that one is returned,
         so the caller can leave the photo out altogether.
         """
         t = time.monotonic()
@@ -279,16 +280,26 @@ class RepostIndex:
         old_id = None if hit is None else int(self.ids[hit])
         resend = hit is not None and self.authors[hit] == author and date - self.dates[hit] < SAME_AUTHOR_GAP
         near = hit is not None and msg_id - old_id <= NEAR_IDS
-        note = ' (same author re-sent it, no reply)' if resend else ' (posted just above, no reply)' if near else ''
+        replied = hit is not None and old_id == reply_to
+        if hit is not None and not replied and old_id not in excluded and reply_to is not None and reply_to > old_id:
+            # a reply with the same picture answers that very message, even when it re-posts the older hit itself;
+            # a reply_to older than the hit was already tried by the walk and is not this picture
+            r = cand[self.ids[cand] == reply_to]
+            if len(r):
+                tried += 1
+                target = os.path.join(self.photos_dir, self.files[r[0]].decode())
+                replied = _same_file(path, target) or compare(path, target)["repost"]
+        note = (' (sent in reply to it, no reply)' if replied else ' (same author re-sent it, no reply)' if resend
+                else ' (posted just above, no reply)' if near else '')
         logger.info(f"photo {msg_id}: hit {old_id}{note}, "
                     f"{tried}/{len(cand)} candidates tried in {time.monotonic() - t:.1f}s")
-        return None if (resend or near) and old_id not in excluded else old_id
+        return None if (replied or resend or near) and old_id not in excluded else old_id
 
     def reposts_of(self, j):
         """Rows tied to row j as a repost in either direction, judged as first_repost judges a pair.
 
         Candidates are the other rows close by PDQ or SSCD; of each pair the newer photo is checked against the older
-        one. SAME_AUTHOR_GAP and NEAR_IDS do not apply: this is about the picture, not about a reply.
+        one. SAME_AUTHOR_GAP, NEAR_IDS and reply_to do not apply: this is about the picture, not about a reply.
         """
         c = (pdq_distance(self.pdq[j], self.pdq) <= PDQ_MAX) | (self.sscd @ self.sscd[j] >= SSCD_MIN)
         c[j] = False

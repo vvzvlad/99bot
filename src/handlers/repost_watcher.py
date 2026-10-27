@@ -146,9 +146,9 @@ def _unless_excluded(old_id, counted):
     return old_id, counted
 
 
-def _check(path, msg_id, author, date):
+def _check(path, msg_id, author, date, reply_to):
     pdq, sscd = features(path)
-    return pdq, sscd, _index.first_repost(path, msg_id, author, date, pdq, sscd, _excluded)
+    return pdq, sscd, _index.first_repost(path, msg_id, author, date, pdq, sscd, _excluded, reply_to)
 
 
 def _catch_up():
@@ -174,8 +174,10 @@ async def _add_photo(client: Client, message: Message):
     path = os.path.join(PHOTOS_DIR, file)
     author = _author(message)
     date = int(message.date.timestamp())
+    # a reply to a message of another chat carries that chat's message id
+    reply_to = None if message.external_reply else message.reply_to_message_id
     await client.download_media(message, file_name=path)
-    pdq, sscd, old_id = await asyncio.to_thread(_check, path, message.id, author, date)
+    pdq, sscd, old_id = await asyncio.to_thread(_check, path, message.id, author, date, reply_to)
     _index.append(np.array([(message.id, author, date, pdq, sscd, file)], ROW))
     old_id, counted = _unless_excluded(old_id, _counted(path))
     _rating.append(np.array([(message.id, author, counted, old_id is not None)], RATE))
