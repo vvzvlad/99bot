@@ -14,9 +14,7 @@ Stage 2 (per candidate): align the two images (SIFT + RANSAC similarity; a pair 
   - rotation (a rotated picture is an edit).
 
 RepostIndex keeps every photo seen so far on disk and runs both stages for a new one, the way replay.py
-replays the chat history. RepostRating keeps, for every index row, whether the picture counts in its author's
-rating (camera photos do not) and whether it is a repost. Nothing here imports the bot, so the module runs
-standalone too.
+replays the chat history. Nothing here imports the bot, so the module runs standalone too.
 """
 import logging
 import os
@@ -180,8 +178,6 @@ MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 # one record per photo message, appended to the index file in message order
 ROW = np.dtype([('id', '<i8'), ('author', '<i8'), ('date', '<i8'), ('pdq', '<u8', (4,)), ('sscd', '<f4', (512,)),
                 ('file', 'S64')])
-# one record per index row, in the same order, appended to the rating file
-RATE = np.dtype([('id', '<i8'), ('author', '<i8'), ('counted', 'u1'), ('repost', 'u1')])
 
 _model = _tf = None
 
@@ -255,15 +251,14 @@ class RepostIndex:
         self.sscd = np.concatenate([self.sscd, row['sscd'].astype(np.float32)])
         self.files = np.concatenate([self.files, row['file']])
 
-    def first_repost(self, path, msg_id, author, date, pdq, sscd, excluded=(), reply_to=None):
+    def first_repost(self, path, msg_id, author, date, pdq, sscd, reply_to=None):
         """Message id of the earliest photo that the photo at path re-posts, or None.
 
         Candidates are earlier photos close by PDQ or SSCD, tried oldest first: a byte-identical file is a repost
         outright, any other goes through stage 2, and the walk stops at the first repost. None also when that first
         hit is the same author re-sending it within SAME_AUTHOR_GAP seconds, is at most NEAR_IDS messages back (then
         every later candidate is too), or when reply_to (the message of this chat this photo replies to) is that hit
-        or a later photo this one re-posts, unless the hit is one of the excluded message ids: that one is returned,
-        so the caller can leave the photo out altogether.
+        or a later photo this one re-posts.
         """
         t = time.monotonic()
         c = (self.ids < msg_id) & ((pdq_distance(pdq, self.pdq) <= PDQ_MAX) | (self.sscd @ sscd >= SSCD_MIN))
@@ -281,7 +276,7 @@ class RepostIndex:
         resend = hit is not None and self.authors[hit] == author and date - self.dates[hit] < SAME_AUTHOR_GAP
         near = hit is not None and msg_id - old_id <= NEAR_IDS
         replied = hit is not None and old_id == reply_to
-        if hit is not None and not replied and old_id not in excluded and reply_to is not None and reply_to > old_id:
+        if hit is not None and not replied and reply_to is not None and reply_to > old_id:
             # a reply with the same picture answers that very message, even when it re-posts the older hit itself;
             # a reply_to older than the hit was already tried by the walk and is not this picture
             r = cand[self.ids[cand] == reply_to]
@@ -293,7 +288,7 @@ class RepostIndex:
                 else ' (posted just above, no reply)' if near else '')
         logger.info(f"photo {msg_id}: hit {old_id}{note}, "
                     f"{tried}/{len(cand)} candidates tried in {time.monotonic() - t:.1f}s")
-        return None if (replied or resend or near) and old_id not in excluded else old_id
+        return None if replied or resend or near else old_id
 
     def reposts_of(self, j):
         """Rows tied to row j as a repost in either direction, judged as first_repost judges a pair.
@@ -312,62 +307,3 @@ class RepostIndex:
                 tied.append(i)
         return np.array(tied, np.int64)
 
-
-def is_photo_aspect(w, h):
-    """True when the picture has a camera's proportions, 4:3 or 16:9 within 1 %."""
-    r = max(w, h) / min(w, h)
-    return any(abs(r / a - 1) <= 0.01 for a in (4 / 3, 16 / 9))
-
-
-class RepostRating:
-    """Per index row: whether the picture counts in the rating and whether it is a repost (RATE records in rating_path)."""
-
-    def __init__(self, rating_path):
-        self.rating_path = rating_path
-        rows = np.zeros(0, RATE)
-        if os.path.exists(rating_path):
-            # a trailing record cut short by a crash is dropped, so the next append starts on a record boundary
-            n = os.path.getsize(rating_path) // RATE.itemsize
-            os.truncate(rating_path, n * RATE.itemsize)
-            rows = np.fromfile(rating_path, RATE, count=n)
-        self.ids = np.ascontiguousarray(rows['id'])
-        self.authors = np.ascontiguousarray(rows['author'])
-        self.counted = np.ascontiguousarray(rows['counted'])
-        self.repost = np.ascontiguousarray(rows['repost'])
-
-    @property
-    def max_id(self):
-        """Largest message id in the rating, 0 when it is empty."""
-        return int(self.ids.max()) if len(self.ids) else 0
-
-    def append(self, row):
-        """Append one record (a RATE array of shape (1,)) to the file and to the arrays."""
-        with open(self.rating_path, "ab") as f:
-            f.write(row.tobytes())
-            f.flush()
-        self.ids = np.concatenate([self.ids, row['id']])
-        self.authors = np.concatenate([self.authors, row['author']])
-        self.counted = np.concatenate([self.counted, row['counted']])
-        self.repost = np.concatenate([self.repost, row['repost']])
-
-    def exclude(self, ids):
-        """Stop counting the rows of these message ids: counted=0 in memory and, byte by byte, in rating_path."""
-        rows = np.nonzero(np.isin(self.ids, ids) & (self.counted > 0))[0]
-        self.counted[rows] = 0
-        with open(self.rating_path, "r+b") as f:
-            for i in rows:
-                f.seek(i * RATE.itemsize + RATE.fields['counted'][1])
-                f.write(b"\x00")
-
-    def stats(self, author):
-        """(n, r) of one author: counted pictures and how many of them are reposts."""
-        mine = (self.authors == author) & (self.counted > 0)
-        return int(mine.sum()), int((mine & (self.repost > 0)).sum())
-
-    def table(self):
-        """{author: (n, r)} for every author with a counted picture."""
-        c = self.counted > 0
-        authors, inv = np.unique(self.authors[c], return_inverse=True)
-        n = np.bincount(inv, minlength=len(authors))
-        r = np.bincount(inv, weights=self.repost[c] > 0, minlength=len(authors)).astype(np.int64)
-        return {int(a): (int(x), int(y)) for a, x, y in zip(authors, n, r)}
