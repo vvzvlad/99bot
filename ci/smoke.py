@@ -161,7 +161,7 @@ decorator ever touches, so a renamed `reply_text` or `get_chat_history` would sa
 everything above and only surface when a user triggered it in production.
 
 Which modules to check is itself checked, rather than being taken on trust from the list
-below: the package is enumerated with pkgutil and compared against it, because an eleventh
+below: the package is enumerated with pkgutil and compared against it, because a twelfth
 handler that nobody added to that list is a hole this gate would neither cover nor
 mention.
 """
@@ -197,7 +197,7 @@ SYMBOLS = [
     ("uvloop", "EventLoopPolicy"),
     ("pyrogram", "Client"),
     ("pyrogram", "filters"),
-    # The eight filters the handlers combine with & and |. They are attributes of a
+    # The ten filters the handlers combine with & and |. They are attributes of a
     # module, so a rename is an AttributeError inside a decorator at registration time —
     # invisible to anything that only imports.
     ("pyrogram.filters", "command"),
@@ -208,6 +208,8 @@ SYMBOLS = [
     ("pyrogram.filters", "service"),
     ("pyrogram.filters", "chat"),
     ("pyrogram.filters", "photo"),
+    ("pyrogram.filters", "caption"),
+    ("pyrogram.filters", "me"),
     ("pyrogram.enums", "MessageServiceType"),
     ("pyrogram.enums", "ChatMemberStatus"),
     # The two service-message kinds the watchers dispatch on, reached as a dotted path
@@ -218,6 +220,7 @@ SYMBOLS = [
     ("pyrogram.enums", "MessageServiceType.NEW_CHAT_PHOTO"),
     ("pyrogram.enums", "ParseMode"),
     ("pyrogram.enums", "ParseMode.MARKDOWN"),
+    ("pyrogram.enums", "ParseMode.HTML"),
     ("pyrogram.errors", "ChatAdminRequired"),
     ("pyrogram.errors", "ChatNotModified"),
     ("pyrogram.errors", "PhotoInvalidDimensions"),
@@ -329,7 +332,7 @@ INLINE_QUERY_METHODS = [
 
 # Every module in src/handlers/, all of them checked, including service_cleaner, whose
 # registration is commented out in main.py today: it is imported there unconditionally, so
-# it breaks the bot's startup exactly like the other nine, and the day somebody
+# it breaks the bot's startup exactly like the other ten, and the day somebody
 # uncomments that line the gate should already have been covering it.
 HANDLER_MODULES = [
     "rename_watcher",
@@ -342,6 +345,7 @@ HANDLER_MODULES = [
     "uk_inline_watcher",
     "lena_watcher",
     "repost_watcher",
+    "mention_watcher",
 ]
 
 
@@ -682,7 +686,7 @@ def main():
 
     # HANDLER_MODULES is written by hand, and a hand-written list of files stops matching
     # its directory the moment somebody adds one. Nothing below would say so: an unlisted
-    # eleventh handler is simply never imported, never registered and never mentioned, so the
+    # twelfth handler is simply never imported, never registered and never mentioned, so the
     # gate keeps reporting the same confident green while covering less. This row is what
     # turns that silent loss of coverage into a failure — the same principle as everywhere
     # else in this file, that a check which cannot be run counts as a check that failed.

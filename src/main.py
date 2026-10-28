@@ -25,6 +25,7 @@ from handlers import pidor_watcher
 from handlers import uk_inline_watcher
 from handlers import lena_watcher
 from handlers import repost_watcher
+from handlers import mention_watcher
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ async def main():
         uk_inline_watcher.register_handler(tg_client.client, group=0)
         lena_watcher.register_handler(tg_client.client, group=0)
         repost_watcher.register_handler(tg_client.client, group=0)
+        mention_watcher.register_handler(tg_client.client, group=0)
         
         #service_cleaner.register_handler(tg_client.client, group=1)
         
