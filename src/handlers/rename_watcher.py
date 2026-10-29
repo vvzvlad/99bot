@@ -46,7 +46,7 @@ def _write_rename_to_csv(new_title: str, actor_username: str, source_username: s
 
 
 def _normalize_title(title: str) -> str:
-    """Drop trailing dots (an ellipsis character included) and spaces, capitalize the first letter"""
+    """Drop trailing dots (an ellipsis character included) and spaces, capitalize the first character"""
     title = re.sub(r"[\s.…]+$", "", title).strip()
     return title[:1].upper() + title[1:]
 
