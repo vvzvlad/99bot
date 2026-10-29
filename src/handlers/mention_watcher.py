@@ -27,8 +27,6 @@ GROUPS_PATH = os.path.join(os.path.abspath(get_settings()["session_path"]), "men
 BATCH = 5
 # the lookbehind skips e-mail addresses
 TAG = re.compile(r"(?<!\w)@(\w+)")
-# vvzvlad: his /join in reply to a message signs up the message's author
-OWNER_ID = 85106994
 
 # group name -> ids of the users who joined it, loaded from GROUPS_PATH on first use
 _groups = None
@@ -71,9 +69,9 @@ async def handle_join(client: Client, message: Message):
             await message.reply_text(text)
             return
         reply = message.reply_to_message
-        # anyone else replying to an announcement with /join signs up themselves, not its author
-        # a reply to a bot (the "напиши /join moscow" hint included) still signs up the owner himself
-        if message.from_user.id == OWNER_ID and reply and reply.from_user and not (reply.from_user.is_self or reply.from_user.is_bot):
+        # /join in reply to someone's message signs up that message's author, whoever sends it;
+        # a reply to a bot (the "напиши /join moscow" hint included) signs up the sender
+        if reply and reply.from_user and not (reply.from_user.is_self or reply.from_user.is_bot):
             user, who = reply.from_user, reply.from_user.first_name or "он"
         else:
             user, who = message.from_user, "ты"
