@@ -10,6 +10,7 @@ import csv
 import logging
 import os
 import random
+import re
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import MessageServiceType
@@ -44,6 +45,12 @@ def _write_rename_to_csv(new_title: str, actor_username: str, source_username: s
         logger.error(f"Failed to write rename to CSV: {str(e)}", exc_info=True)
 
 
+def _normalize_title(title: str) -> str:
+    """Drop trailing dots (an ellipsis character included) and spaces, capitalize the first letter"""
+    title = re.sub(r"[\s.…]+$", "", title).strip()
+    return title[:1].upper() + title[1:]
+
+
 async def handle_rename(client: Client, message: Message):
     """
     Обработка команды /rename
@@ -65,7 +72,9 @@ async def handle_rename(client: Client, message: Message):
 
         if message.reply_to_message:
             reply = message.reply_to_message
-            reply_text = reply.text or reply.caption
+            # A manually quoted fragment of the replied message wins over its whole text
+            quote_text = message.quote.text if message.quote else None
+            reply_text = quote_text or reply.text or reply.caption
             if reply_text:
                 new_title = reply_text
                 # Чьё сообщение использовано как новое название
@@ -85,12 +94,13 @@ async def handle_rename(client: Client, message: Message):
             await message.delete()
             return
 
-        if not new_title or not new_title.strip():
-            await message.delete()
-            return
-
         if len(new_title) > 255:
             new_title = new_title[:255]
+
+        new_title = _normalize_title(new_title)
+        if not new_title:
+            await message.delete()
+            return
 
         await message.delete()
 
