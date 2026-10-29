@@ -60,11 +60,15 @@ async def handle_rename(client: Client, message: Message):
         new_title = None
         source_username = None
 
+        # A photo or video keeps its text in caption, not in text
+        command_text = message.text or message.caption
+
         if message.reply_to_message:
-            if message.reply_to_message.text:
-                new_title = message.reply_to_message.text
+            reply = message.reply_to_message
+            reply_text = reply.text or reply.caption
+            if reply_text:
+                new_title = reply_text
                 # Чьё сообщение использовано как новое название
-                reply = message.reply_to_message
                 if reply.from_user:
                     source_username = reply.from_user.username or reply.from_user.first_name or "user"
                 elif reply.sender_chat:
@@ -74,8 +78,8 @@ async def handle_rename(client: Client, message: Message):
             else:
                 await message.delete()
                 return
-        elif message.text and len(message.text.split(maxsplit=1)) > 1:
-            new_title = message.text.split(maxsplit=1)[1]
+        elif command_text and len(command_text.split(maxsplit=1)) > 1:
+            new_title = command_text.split(maxsplit=1)[1]
             source_username = None  # название задано напрямую, не из чужого сообщения
         else:
             await message.delete()
