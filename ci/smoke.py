@@ -227,6 +227,7 @@ SYMBOLS = [
     ("pyrogram.errors", "PhotoInvalidDimensions"),
     ("pyrogram.errors", "PhotoExtInvalid"),
     ("pyrogram.errors", "FloodWait"),
+    ("pyrogram.errors", "RPCError"),
     ("pyrogram.types", "Message"),
     ("pyrogram.types", "InlineQuery"),
     ("pyrogram.types", "InlineQueryResultArticle"),
@@ -289,6 +290,7 @@ SYMBOLS = [
 # on the class, which is exactly why this list is checked against a live INSTANCE.
 CLIENT_METHODS = [
     "get_me",
+    "get_users",
     "get_chat_members",
     "get_chat_history",
     "get_media_group",

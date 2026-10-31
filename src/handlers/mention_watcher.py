@@ -17,6 +17,7 @@ import re
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
+from pyrogram.errors import RPCError
 
 from config import get_settings
 
@@ -73,9 +74,18 @@ async def handle_join(client: Client, message: Message):
             await message.reply_text(text)
             return
         reply = message.reply_to_message
-        # /join in reply to someone's message signs up that message's author, whoever sends it;
-        # a reply to a bot (the "напиши /join moscow" hint included) signs up the sender
-        if reply and reply.from_user and not (reply.from_user.is_self or reply.from_user.is_bot):
+        # "/join moscow @vasya" signs up the named user; /join in reply to someone's message
+        # signs up that message's author, whoever sends it; a reply to a bot (the
+        # "напиши /join moscow" hint included) signs up the sender
+        if len(message.command) > 2:
+            handle = message.command[2].removeprefix("@")
+            try:
+                user = await client.get_users(handle)
+            except RPCError:
+                await message.reply_text(f"не знаю @{handle}")
+                return
+            who = user.first_name or handle
+        elif reply and reply.from_user and not (reply.from_user.is_self or reply.from_user.is_bot):
             user, who = reply.from_user, reply.from_user.first_name or "он"
         else:
             user, who = message.from_user, "ты"
