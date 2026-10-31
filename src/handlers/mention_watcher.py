@@ -8,6 +8,7 @@ and did not /leave it. A group appears with its first /join and disappears with 
 The names go out in replies of five.
 """
 
+import difflib
 import html
 import json
 import logging
@@ -27,6 +28,9 @@ GROUPS_PATH = os.path.join(os.path.abspath(get_settings()["session_path"]), "men
 BATCH = 5
 # the lookbehind skips e-mail addresses
 TAG = re.compile(r"(?<!\w)@(\w+)")
+# a tag at least this similar (difflib ratio) to a group's name is taken for a misspelling of it:
+# @наркоманы_ебучие against @наркоманы_ебаные scores 0.81, the chat's usernames stay under 0.35
+CLOSE = 0.8
 
 # group name -> ids of the users who joined it, loaded from GROUPS_PATH on first use
 _groups = None
@@ -114,8 +118,16 @@ async def handle_mention(client: Client, message: Message):
             return
         tags = {tag.lower() for tag in TAG.findall(text)}
         groups = _load()
-        # a tag that is not a group is an ordinary username
+        # a tag that is not a group is an ordinary username...
         wanted = {user_id for tag in tags for user_id in groups.get(tag, [])}
+        # ...unless it is a group's name misspelled: then the bot names the group instead of
+        # guessing and calling it, so a username that merely resembles a group calls nobody
+        typos = [(tag, close[0]) for tag in sorted(tags - set(groups))
+                 if (close := difflib.get_close_matches(tag, groups, n=1, cutoff=CLOSE))]
+        if typos:
+            # no markup: a double underscore in a misspelled name would otherwise turn into italics
+            await message.reply_text("\n".join(f"нет @{tag}, есть @{group}" for tag, group in typos),
+                                     parse_mode=ParseMode.DISABLED)
         if not wanted:
             return
 

@@ -221,6 +221,7 @@ SYMBOLS = [
     ("pyrogram.enums", "ParseMode"),
     ("pyrogram.enums", "ParseMode.MARKDOWN"),
     ("pyrogram.enums", "ParseMode.HTML"),
+    ("pyrogram.enums", "ParseMode.DISABLED"),
     ("pyrogram.errors", "ChatAdminRequired"),
     ("pyrogram.errors", "ChatNotModified"),
     ("pyrogram.errors", "PhotoInvalidDimensions"),
