@@ -3,7 +3,7 @@
 
 """
 Lena Pregnancy Progress Bar Handler
-Responds to /lena command with a pregnancy progress bar showing weeks elapsed,
+Responds to /lena (or /лена) with a pregnancy progress bar showing weeks elapsed,
 percentage complete, due date, and days remaining.
 """
 
@@ -86,7 +86,7 @@ def register_handler(client: Client, group: int = 0):
     """Register /lena command handler (groups, plus private chat for Lena only)"""
 
     @client.on_message(
-        filters.command(["lena"]) & (filters.group | (filters.private & filters.user(LENA_USER_IDS))),
+        filters.command(["lena", "лена"]) & (filters.group | (filters.private & filters.user(LENA_USER_IDS))),
         group=group,
     )
     async def lena_wrapper(client: Client, message: Message):
