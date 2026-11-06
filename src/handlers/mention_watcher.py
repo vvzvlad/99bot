@@ -64,7 +64,9 @@ def _group_name(message: Message):
     if len(message.command) < 2:
         return None
     name = message.command[1].removeprefix("#").lower()
-    return name if re.fullmatch(r"\w+", name) and not BLANK.search(name) else None
+    # at least one letter or digit: "/join _" made a group #_
+    valid = re.fullmatch(r"\w+", name) and re.search(r"[^\W_]", name) and not BLANK.search(name)
+    return name if valid else None
 
 
 async def handle_join(client: Client, message: Message):
