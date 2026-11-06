@@ -197,7 +197,7 @@ SYMBOLS = [
     ("uvloop", "EventLoopPolicy"),
     ("pyrogram", "Client"),
     ("pyrogram", "filters"),
-    # The ten filters the handlers combine with & and |. They are attributes of a
+    # The eleven filters the handlers combine with & and |. They are attributes of a
     # module, so a rename is an AttributeError inside a decorator at registration time —
     # invisible to anything that only imports.
     ("pyrogram.filters", "command"),
@@ -210,6 +210,7 @@ SYMBOLS = [
     ("pyrogram.filters", "photo"),
     ("pyrogram.filters", "caption"),
     ("pyrogram.filters", "me"),
+    ("pyrogram.filters", "forwarded"),
     ("pyrogram.enums", "MessageServiceType"),
     ("pyrogram.enums", "ChatMemberStatus"),
     # The two service-message kinds the watchers dispatch on, reached as a dotted path

@@ -190,8 +190,10 @@ def register_handler(client: Client, group: int = 0):
         await handle_leave(client, message)
         await message.continue_propagation()
 
-    # not from the bot itself: its own "ты в #moscow" must not call the group
-    @client.on_message(filters.chat(CHAT_ID) & (filters.text | filters.caption) & ~filters.me, group=group)
+    # not from the bot itself: its own "ты в #moscow" must not call the group; and not a
+    # forward: a channel post's own hashtags (#moscow) must not call it either
+    @client.on_message(filters.chat(CHAT_ID) & (filters.text | filters.caption) & ~filters.me
+                       & ~filters.forwarded, group=group)
     async def mention_wrapper(client: Client, message: Message):
         await handle_mention(client, message)
         await message.continue_propagation()
