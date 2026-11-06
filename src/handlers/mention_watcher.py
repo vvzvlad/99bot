@@ -34,8 +34,10 @@ TAG = re.compile(r"(?<!\w)#(\w+)")
 # a tag at least this similar (difflib ratio) to a group's name is taken for a misspelling of it:
 # #наркоманы_ебучие against #наркоманы_ебаные scores 0.81
 CLOSE = 0.8
-# the Hangul fillers are letters with no glyph: a name made of them is a group nobody can see
-BLANK = re.compile("[\\u115f\\u1160\\u3164\\uffa0]")
+# a group name: Latin a-z, Russian а-я and ё, digits and underscores, with at least one letter
+# or digit; "\w" let in a lone underscore, invisible Hangul fillers and one-letter names such
+# as #ʘ and #𐳓
+NAME = re.compile(r"(?=.*[0-9a-zа-яё])[0-9a-zа-яё_]+")
 
 # group name -> ids of the users who joined it, loaded from GROUPS_PATH on first use
 _groups = None
@@ -64,9 +66,7 @@ def _group_name(message: Message):
     if len(message.command) < 2:
         return None
     name = message.command[1].removeprefix("#").lower()
-    # at least one letter or digit: "/join _" made a group #_
-    valid = re.fullmatch(r"\w+", name) and re.search(r"[^\W_]", name) and not BLANK.search(name)
-    return name if valid else None
+    return name if NAME.fullmatch(name) else None
 
 
 async def handle_join(client: Client, message: Message):
