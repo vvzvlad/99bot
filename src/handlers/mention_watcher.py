@@ -3,7 +3,7 @@
 
 """
 Mention Watcher Plugin
-Tags chat members on @<group> (@all included): the members who signed up with /join <group>
+Tags chat members on #<group> (#all included): the members who signed up with /join <group>
 and did not /leave it. A group appears with its first /join and disappears with its last /leave.
 The names go out in replies of five.
 """
@@ -27,11 +27,15 @@ CHAT_ID = -1001833941803
 GROUPS_PATH = os.path.join(os.path.abspath(get_settings()["session_path"]), "mention_groups.json")
 # only the first five mentions in a message get a push notification
 BATCH = 5
-# the lookbehind skips e-mail addresses
-TAG = re.compile(r"(?<!\w)@(\w+)")
+# groups are called with #, not @: a group named after someone's username took over every
+# @mention of that person; the lookbehind skips a # glued to a word, such as page#anchor
+# (a link's /#anchor still counts)
+TAG = re.compile(r"(?<!\w)#(\w+)")
 # a tag at least this similar (difflib ratio) to a group's name is taken for a misspelling of it:
-# @наркоманы_ебучие against @наркоманы_ебаные scores 0.81, the chat's usernames stay under 0.35
+# #наркоманы_ебучие against #наркоманы_ебаные scores 0.81
 CLOSE = 0.8
+# the Hangul fillers are letters with no glyph: a name made of them is a group nobody can see
+BLANK = re.compile("[\\u115f\\u1160\\u3164\\uffa0]")
 
 # group name -> ids of the users who joined it, loaded from GROUPS_PATH on first use
 _groups = None
@@ -56,11 +60,11 @@ def _save():
 
 
 def _group_name(message: Message):
-    """The group the command names, without a leading @ and lowercased, or None when it is missing or invalid."""
+    """The group the command names, without a leading # and lowercased, or None when it is missing or invalid."""
     if len(message.command) < 2:
         return None
-    name = message.command[1].removeprefix("@").lower()
-    return name if re.fullmatch(r"\w+", name) else None
+    name = message.command[1].removeprefix("#").lower()
+    return name if re.fullmatch(r"\w+", name) and not BLANK.search(name) else None
 
 
 async def handle_join(client: Client, message: Message):
@@ -70,9 +74,16 @@ async def handle_join(client: Client, message: Message):
         if name is None:
             text = "напиши /join moscow"
             if groups:
-                text += " — есть: " + ", ".join(f"@{group}" for group in sorted(groups))
+                text += " — есть: " + ", ".join(f"#{group}" for group in sorted(groups))
             await message.reply_text(text)
             return
+        # a group must not be named after a member's username: #vvzvlad reads as that member;
+        # collectible usernames count too, and the name is given without @ so as not to ping him
+        async for member in client.get_chat_members(CHAT_ID):
+            handles = [member.user.username, *(u.username for u in member.user.usernames or [])]
+            if name in {handle.lower() for handle in handles if handle}:
+                await message.reply_text(f"{name} — это ник, а не группа")
+                return
         reply = message.reply_to_message
         # "/join moscow @vasya" signs up the named user; /join in reply to someone's message
         # signs up that message's author, whoever sends it; a reply to a bot (the
@@ -91,11 +102,11 @@ async def handle_join(client: Client, message: Message):
             user, who = message.from_user, "ты"
         members = groups.setdefault(name, [])
         if user.id in members:
-            await message.reply_text(f"{who} уже в @{name}")
+            await message.reply_text(f"{who} уже в #{name}")
             return
         members.append(user.id)
         _save()
-        await message.reply_text(f"{who} в @{name}")
+        await message.reply_text(f"{who} в #{name}")
     except Exception as e:
         logger.error(f"Error in join handler: {str(e)}", exc_info=True)
 
@@ -109,13 +120,13 @@ async def handle_leave(client: Client, message: Message):
         groups = _load()
         members = groups.get(name, [])
         if message.from_user.id not in members:
-            await message.reply_text(f"тебя и не было в @{name}")
+            await message.reply_text(f"тебя и не было в #{name}")
             return
         members.remove(message.from_user.id)
         if not members:
             del groups[name]
         _save()
-        await message.reply_text(f"ты больше не в @{name}")
+        await message.reply_text(f"ты больше не в #{name}")
     except Exception as e:
         logger.error(f"Error in leave handler: {str(e)}", exc_info=True)
 
@@ -123,20 +134,20 @@ async def handle_leave(client: Client, message: Message):
 async def handle_mention(client: Client, message: Message):
     try:
         text = message.text or message.caption
-        # a command such as "/join @moscow" names a group, it does not call it
+        # a command such as "/join #moscow" names a group, it does not call it
         if text.startswith("/"):
             return
         tags = {tag.lower() for tag in TAG.findall(text)}
         groups = _load()
-        # a tag that is not a group is an ordinary username...
+        # a tag that is not a group is an ordinary hashtag...
         wanted = {user_id for tag in tags for user_id in groups.get(tag, [])}
         # ...unless it is a group's name misspelled: then the bot names the group instead of
-        # guessing and calling it, so a username that merely resembles a group calls nobody
+        # guessing and calling it, so a hashtag that merely resembles a group calls nobody
         typos = [(tag, close[0]) for tag in sorted(tags - set(groups))
                  if (close := difflib.get_close_matches(tag, groups, n=1, cutoff=CLOSE))]
         if typos:
             # no markup: a double underscore in a misspelled name would otherwise turn into italics
-            await message.reply_text("\n".join(f"нет @{tag}, есть @{group}" for tag, group in typos),
+            await message.reply_text("\n".join(f"нет #{tag}, есть #{group}" for tag, group in typos),
                                      parse_mode=ParseMode.DISABLED)
         if not wanted:
             return
@@ -164,7 +175,7 @@ async def handle_mention(client: Client, message: Message):
 
 
 def register_handler(client: Client, group: int = 0):
-    """Register the /join, /leave and @mention handlers for the chat"""
+    """Register the /join, /leave and #group handlers for the chat"""
 
     # text only: filters.command also matches a media caption
     @client.on_message(filters.command("join") & filters.text & filters.chat(CHAT_ID), group=group)
@@ -177,7 +188,7 @@ def register_handler(client: Client, group: int = 0):
         await handle_leave(client, message)
         await message.continue_propagation()
 
-    # not from the bot itself: its own "ты в @moscow" must not call the group
+    # not from the bot itself: its own "ты в #moscow" must not call the group
     @client.on_message(filters.chat(CHAT_ID) & (filters.text | filters.caption) & ~filters.me, group=group)
     async def mention_wrapper(client: Client, message: Message):
         await handle_mention(client, message)
