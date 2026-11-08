@@ -38,6 +38,9 @@ CLOSE = 0.8
 # or digit; "\w" let in a lone underscore, invisible Hangul fillers and one-letter names such
 # as #ʘ and #𐳓
 NAME = re.compile(r"(?=.*[0-9a-zа-яё])[0-9a-zа-яё_]+")
+# Latin letters that look like Russian ones: "#бимбo" with a Latin o means #бимбо, not a
+# misspelling of it, and the hint "нет #бимбo, есть #бимбо" reads as nonsense
+LOOKALIKE = str.maketrans("aceopxy", "асеорху")
 
 # group name -> ids of the users who joined it, loaded from GROUPS_PATH on first use
 _groups = None
@@ -69,6 +72,14 @@ def _group_name(message: Message):
     return name if NAME.fullmatch(name) else None
 
 
+def _find(name, groups):
+    """The existing group the name means, lookalike Latin and Russian letters taken as one, or None."""
+    if name in groups:
+        return name
+    folded = name.translate(LOOKALIKE)
+    return next((group for group in groups if group.translate(LOOKALIKE) == folded), None)
+
+
 async def handle_join(client: Client, message: Message):
     try:
         name = _group_name(message)
@@ -83,9 +94,11 @@ async def handle_join(client: Client, message: Message):
         # collectible usernames count too, and the name is given without @ so as not to ping him
         async for member in client.get_chat_members(CHAT_ID):
             handles = [member.user.username, *(u.username for u in member.user.usernames or [])]
-            if name in {handle.lower() for handle in handles if handle}:
+            if name.translate(LOOKALIKE) in {h.lower().translate(LOOKALIKE) for h in handles if h}:
                 await message.reply_text(f"{name} — это ник, а не группа")
                 return
+        # "/join бимбo" with a Latin o joins #бимбо rather than starting a lookalike next to it
+        name = _find(name, groups) or name
         reply = message.reply_to_message
         # "/join moscow @vasya" signs up the named user; /join in reply to someone's message
         # signs up that message's author, whoever sends it; a reply to a bot (the
@@ -120,6 +133,7 @@ async def handle_leave(client: Client, message: Message):
             await message.reply_text("напиши /leave moscow")
             return
         groups = _load()
+        name = _find(name, groups) or name
         members = groups.get(name, [])
         if message.from_user.id not in members:
             await message.reply_text(f"тебя и не было в #{name}")
@@ -141,11 +155,12 @@ async def handle_mention(client: Client, message: Message):
             return
         tags = {tag.lower() for tag in TAG.findall(text)}
         groups = _load()
+        found = {tag: _find(tag, groups) for tag in tags}
         # a tag that is not a group is an ordinary hashtag...
-        wanted = {user_id for tag in tags for user_id in groups.get(tag, [])}
+        wanted = {user_id for group in found.values() if group for user_id in groups[group]}
         # ...unless it is a group's name misspelled: then the bot names the group instead of
         # guessing and calling it, so a hashtag that merely resembles a group calls nobody
-        typos = [(tag, close[0]) for tag in sorted(tags - set(groups))
+        typos = [(tag, close[0]) for tag in sorted(tag for tag, group in found.items() if group is None)
                  if (close := difflib.get_close_matches(tag, groups, n=1, cutoff=CLOSE))]
         if typos:
             # no markup: a double underscore in a misspelled name would otherwise turn into italics
