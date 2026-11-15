@@ -5,7 +5,7 @@
 Repost Watcher Plugin
 Replies "это уже было" (or another phrase at random) to a photo in the chat when it repeats an earlier one
 (repost_detector tells a re-post of the same picture from a derivative meme),
-or a jab at the poster's memory when every original is their own picture,
+or a jab at the poster's memory when every original is their own picture, either one saying how many days ago the originals were posted,
 and takes a picture (a sticker sent as a photo) and its reposts out of the watch on /st.
 """
 
@@ -15,12 +15,13 @@ import logging
 import os
 import random
 import time
+from datetime import datetime
 import numpy as np
 from pyrogram import Client, filters
 from pyrogram.types import Message, LinkPreviewOptions
 from pyrogram.enums import ParseMode
 
-from config import get_settings
+from config import get_app_timezone, get_settings, pluralize_days
 from repost_detector import ROW, RepostIndex, features, load_model
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,13 @@ def _author(message: Message):
     if message.sender_chat:
         return message.sender_chat.id
     return 0
+
+
+def _ago(then, now):
+    """How long before now the original was posted (both unix seconds), in calendar days of the app's timezone."""
+    tz = get_app_timezone()
+    days = (datetime.fromtimestamp(now, tz).date() - datetime.fromtimestamp(then, tz).date()).days
+    return "сегодня" if days == 0 else f"{days} {pluralize_days(days)} назад"
 
 
 def _check(path, msg_id, author, date, reply_to):
@@ -173,12 +181,19 @@ async def _on_photo(client: Client, message: Message):
                 author = _author(message)
                 own = all(int(_index.authors[_index.ids == o][0]) == author for o in originals)
                 head = random.choice(ALZHEIMER if own else REPOST)
+                now = int(message.date.timestamp())
+                ago = {o: _ago(int(_index.dates[_index.ids == o][0]), now) for o in originals}
                 if len(originals) == 1:
-                    text = f"[{head}]({LINK.format(originals[0])})"
+                    # a dash, not a comma: the phrase may end in "?"
+                    text = f"[{head}]({LINK.format(originals[0])}) — {ago[originals[0]]}"
                 else:
                     # a dash after a phrase that may end in "?" or hold a colon itself
                     sep = " — " if own else ": "
-                    text = f"{head}{sep}" + ", ".join(f"[{i}]({LINK.format(o)})" for i, o in enumerate(originals, 1))
+                    # numbered links, the age once per group of originals posted the same day (an album shares one date)
+                    groups = {}
+                    for i, o in enumerate(originals, 1):
+                        groups.setdefault(ago[o], []).append(f"[{i}]({LINK.format(o)})")
+                    text = f"{head}{sep}" + "; ".join(f"{', '.join(links)} ({age})" for age, links in groups.items())
                 await hits[0][0].reply_text(text, parse_mode=ParseMode.MARKDOWN,
                                             link_preview_options=LinkPreviewOptions(is_disabled=True))
         except Exception as e:

@@ -12,6 +12,8 @@ from datetime import date, timedelta
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
+from config import pluralize_days
+
 logger = logging.getLogger(__name__)
 
 # Hardcoded last menstrual period date (LMP) — start of pregnancy
@@ -31,19 +33,6 @@ MONTHS_RU = {
     5: "мая", 6: "июня", 7: "июля", 8: "августа",
     9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
 }
-
-
-def pluralize_days(n: int) -> str:
-    """Return correct Russian plural form of 'day' for a given number."""
-    abs_n = abs(n)
-    mod10, mod100 = abs_n % 10, abs_n % 100
-    if 11 <= mod100 <= 14:
-        return "дней"
-    if mod10 == 1:
-        return "день"
-    if 2 <= mod10 <= 4:
-        return "дня"
-    return "дней"
 
 
 async def handle_lena(client: Client, message: Message):

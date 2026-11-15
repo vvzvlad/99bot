@@ -24,6 +24,20 @@ def now_in_app_timezone() -> datetime:
     """Return current timezone-aware datetime in app timezone."""
     return datetime.now(get_app_timezone())
 
+
+def pluralize_days(n: int) -> str:
+    """Return correct Russian plural form of 'day' for a given number."""
+    abs_n = abs(n)
+    mod10, mod100 = abs_n % 10, abs_n % 100
+    if 11 <= mod100 <= 14:
+        return "дней"
+    if mod10 == 1:
+        return "день"
+    if 2 <= mod10 <= 4:
+        return "дня"
+    return "дней"
+
+
 def setup_logging(level_name: str = "INFO") -> None:
     global _LOGGING_INITIALIZED 
     
