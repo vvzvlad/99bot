@@ -6,7 +6,7 @@ Repost Watcher Plugin
 Replies "это уже было" (or another phrase at random) to a photo in the chat when it repeats an earlier one
 (repost_detector tells a re-post of the same picture from a derivative meme),
 or a jab at the poster's memory when every original is their own picture, either one saying how many days ago the originals were posted,
-and takes a picture (a sticker sent as a photo) and its reposts out of the watch on /st.
+and takes a picture (a sticker sent as a photo) and its reposts out of the watch on /ex.
 """
 
 import asyncio
@@ -50,12 +50,12 @@ ALZHEIMER = (
     "память как у золотой рыбки: ты сам это уже постил",
 )
 
-# serialises the startup, every photo and /st, so rows are appended in message order
+# serialises the startup, every photo and /ex, so rows are appended in message order
 _lock = asyncio.Lock()
 # references to the running tasks, so they are not garbage-collected mid-flight
 _tasks = set()
 _index = None
-# message ids of the pictures /st took out (stickers sent as photos): neither they nor their reposts are reposts
+# message ids of the pictures /ex took out (stickers sent as photos): neither they nor their reposts are reposts
 _excluded = None
 
 
@@ -107,7 +107,7 @@ def _check(path, msg_id, author, date, reply_to):
 async def _add_photo(client: Client, message: Message, check: bool):
     """Download one photo message and append it to the index; with check, return the original it re-posts, or None.
 
-    A photo that re-posts a picture /st took out is no repost.
+    A photo that re-posts a picture /ex took out is no repost.
     """
     file = f"{message.id}.jpg"
     path = os.path.join(PHOTOS_DIR, file)
@@ -200,8 +200,8 @@ async def _on_photo(client: Client, message: Message):
             logger.error(f"Error in repost watcher for message {message.id}: {str(e)}", exc_info=True)
 
 
-async def _on_st(message: Message):
-    """/st in reply to a picture, or to the bot's answer to it: the picture and those tied to it are no reposts."""
+async def _on_ex(message: Message):
+    """/ex in reply to a picture, or to the bot's answer to it: the picture and those tied to it are no reposts."""
     async with _lock:
         try:
             target = message.reply_to_message
@@ -218,7 +218,7 @@ async def _on_st(message: Message):
                 ids = [pic_id, *(int(i) for i in _index.ids[tied])]
                 _excluded.update(ids)
                 _save_excluded()
-                logger.info(f"/st on photo {pic_id}: {len(ids)} pictures excluded")
+                logger.info(f"/ex on photo {pic_id}: {len(ids)} pictures excluded")
                 await message.reply_text("картинка исключена")
         except Exception as e:
             logger.error(f"Error in repost exclusion for message {message.id}: {str(e)}", exc_info=True)
@@ -230,7 +230,7 @@ def start(client: Client):
 
 
 def register_handler(client: Client, group: int = 0):
-    """Register the photo and /st handlers for the chat"""
+    """Register the photo and /ex handlers for the chat"""
     @client.on_message(filters.chat(CHAT_ID) & filters.photo, group=group)
     async def repost_wrapper(client: Client, message: Message):
         # stage 2 may take minutes, so it must not hold a dispatcher worker
@@ -238,10 +238,10 @@ def register_handler(client: Client, group: int = 0):
         await message.continue_propagation()
 
     # text only: filters.command also matches a media caption, and a captioned photo is not a command
-    @client.on_message(filters.command("st") & filters.text & filters.chat(CHAT_ID), group=group)
-    async def st_wrapper(client: Client, message: Message):
+    @client.on_message(filters.command("ex") & filters.text & filters.chat(CHAT_ID), group=group)
+    async def ex_wrapper(client: Client, message: Message):
         # waits for the lock, which a photo's stage 2 may hold for minutes
-        _spawn(_on_st(message))
+        _spawn(_on_ex(message))
         await message.continue_propagation()
 
     logger.info("Repost watcher handler registered")
