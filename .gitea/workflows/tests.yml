@@ -69,7 +69,7 @@ jobs:
       # container as a whole. The runner image has `python3`, not `python`.
       # It uses fake api_id/api_hash, so no session is needed; its verdict is taken before
       # the client touches the network. Containers carry the run id and map no ports.
-      # 10 minutes covers ci/smoke.py's documented worst case of 465 s.
+      # 10 minutes covers ci/smoke.py's documented worst case of 555 s.
       timeout-minutes: 10
       env:
         SMOKE_IMAGE: ${{ steps.tags.outputs.local }}
@@ -85,10 +85,11 @@ jobs:
       # image cleanup because a leftover container pins the image.
       if: always()
       run: |
-        # The empty suffix is check (d)'s container; -guard and -probe are the two the gate
-        # runs with `--rm`. Kept in step with GUARD_SUFFIX/PROBE_SUFFIX in ci/smoke.py.
+        # The empty suffix is check (d)'s container; -guard, -probe and -restart are the
+        # three the gate runs with `--rm`. Kept in step with GUARD_SUFFIX/PROBE_SUFFIX/
+        # RESTART_SUFFIX in ci/smoke.py.
         # Best-effort: no `set -e`, a leftover container must not turn the job red.
-        for suffix in "" -guard -probe; do docker rm -f "$SMOKE_NAME$suffix" || true; done
+        for suffix in "" -guard -probe -restart; do docker rm -f "$SMOKE_NAME$suffix" || true; done
 
     - name: Remove the built image from the runner
       # Removes ONLY this run's tag; no `docker system prune` on a daemon shared with other

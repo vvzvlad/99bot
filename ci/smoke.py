@@ -19,7 +19,8 @@ Checks:
   requirements.txt pins nothing from above, so every rebuild takes the newest Kurigram,
   and a renamed symbol inside a decorator only breaks at registration time;
 * (c) the image's declared command and the file it names agree;
-* (d) the real CMD, started with fake credentials, logs its first line.
+* (d) the real CMD, started with fake credentials, logs its first line;
+* (e) the bot's self-restart ends the process when python is PID 1, as in production.
 
 Failures leave through SystemExit, never `assert` (asserts vanish under PYTHONOPTIMIZE=1).
 Every check runs before anything is reported, and a check that cannot run reports FAILED.
@@ -44,6 +45,7 @@ NAME_ENV = "SMOKE_NAME"
 # otherwise also pin the image). Kept in step with the suffix list in both workflows.
 GUARD_SUFFIX = "-guard"
 PROBE_SUFFIX = "-probe"
+RESTART_SUFFIX = "-restart"
 
 # The Dockerfile's WORKDIR and the script its CMD names. Hardcoded rather than read back
 # out of the image: these are the contract between this repo and its image, so a Dockerfile
@@ -97,16 +99,23 @@ BOOT_MARKER = "Starting Telegram Chat Manager Bot"
 # script.
 PROBE_MARKER = "99bot smoke probe ok"
 
+# Check (e)'s two markers. The first is printed right before _restart_app() is called, so
+# its absence means the probe died earlier (an ImportError also exits non-zero); the second
+# is printed only if the process is still alive after the call returned.
+RESTART_CALL_MARKER = "99bot restart probe: calling _restart_app"
+RESTART_SURVIVED_MARKER = "99bot restart probe: still running"
+
 # Bounds for every docker call: a hung gate holds a shared runner slot until the step
 # timeout kills it, and a killed step skips its cleanup. Generous against the real cost
 # (a couple of seconds). The worst-case sum must stay under the smoke step's
 # `timeout-minutes` (10) in both workflows:
-#   30 (inspect) + 30 (rm) + 90 (guard) + 30 (rm) + 120 (probe) + 30 (rm) + 60 (run -d)
-#   + 45 (boot poll) + 30 (rm) = 465 s.
-# Three of those `rm`s are pre-run cleanups: a re-run from the UI keeps the run id, hence
+#   30 (inspect) + 30 (rm) + 90 (guard) + 30 (rm) + 120 (probe) + 30 (rm) + 60 (restart)
+#   + 30 (rm) + 60 (run -d) + 45 (boot poll) + 30 (rm) = 555 s.
+# Four of those `rm`s are pre-run cleanups: a re-run from the UI keeps the run id, hence
 # the same $SMOKE_NAME, and must not die on "name already in use".
 GUARD_TIMEOUT = 90
 PROBE_TIMEOUT = 120
+RESTART_TIMEOUT = 60
 INSPECT_TIMEOUT = 30
 REMOVE_TIMEOUT = 30
 START_TIMEOUT = 60
@@ -768,6 +777,26 @@ if __name__ == "__main__":
 '''
 
 
+# Fed to `python -u -` by check (e). The interpreter is the container's PID 1, exactly as
+# `python src/main.py` is in production. _restart_app() does not touch `self`, so no client
+# is built and nothing reaches the network. The 5 s sleep is far longer than any signal
+# delivery takes; a process still alive after it was not restarted. An exception is caught
+# and printed, as Kurigram's caller does with the disconnect handler's: in production it
+# does not end the process either, so it must not make this check pass.
+RESTART_PROBE = r'''
+import time
+import traceback
+from telegram_client import TelegramClient
+print("99bot restart probe: calling _restart_app", flush=True)
+try:
+    TelegramClient._restart_app(None)
+except Exception:
+    traceback.print_exc()
+time.sleep(5)
+print("99bot restart probe: still running", flush=True)
+'''
+
+
 def excerpt(text):
     """Bound what reaches the log, and say so when something was cut."""
     if text is None:
@@ -958,6 +987,43 @@ def check_probe(image, name):
     return [(target, None)], output
 
 
+def check_restart_exits(image, name):
+    """The disconnect handler's self-restart must end the process, run as PID 1.
+
+    When the session keeps dropping, telegram_client calls _restart_app() and relies on
+    `restart: always` to start a fresh bot. The image has no init, so python is PID 1, and
+    the kernel drops a signal PID 1 sends itself unless it installed a handler for it: the
+    bot once sent itself SIGTERM over a thousand times and kept running for hours on a
+    session that no longer received updates. `--init` must NOT be added here, it would hide exactly that.
+    """
+    target = "TelegramClient._restart_app() ends the process when python is PID 1"
+    remove_container(name)
+    status, output = docker(
+        [
+            "run", "--rm", "-i", "--name", name,
+            "-e", "PYTHONPATH=" + SRC_DIR,
+            "-e", "TG_API_ID=" + DUMMY_API_ID,
+            "-e", "TG_API_HASH=" + DUMMY_API_HASH,
+            "-e", "SESSION_PATH=" + SMOKE_SESSION_PATH,
+            image, "python", "-u", "-",
+        ],
+        RESTART_TIMEOUT,
+        stdin_text=RESTART_PROBE)
+    if status is None:
+        return [(target, output)], output
+    if RESTART_CALL_MARKER not in output:
+        return [(target, (
+            "the probe exited {} before it called _restart_app(), so this says nothing "
+            "about the restart; see the transcript above (an import error, or docker could "
+            "not start the container)".format(status)))], output
+    if RESTART_SURVIVED_MARKER in output or status == 0:
+        return [(target, (
+            "the process outlived the call (exit {}). In production the bot would keep "
+            "running on a dead session instead of being restarted by Docker".format(
+                status)))], output
+    return [(target, None)], output
+
+
 def check_boot(image, name):
     """Start the image's REAL command and wait for its first log line.
 
@@ -1055,6 +1121,10 @@ def main():
     probe_rows, probe_output = check_probe(image, name + PROBE_SUFFIX)
     transcripts.append(("the import-and-register probe, inside the image", probe_output))
     rows.extend(probe_rows)
+
+    restart_rows, restart_output = check_restart_exits(image, name + RESTART_SUFFIX)
+    transcripts.append(("the self-restart, run as PID 1 inside the image", restart_output))
+    rows.extend(restart_rows)
 
     boot_rows, boot_output = check_boot(image, name)
     transcripts.append(("the image's own command, started with fake credentials",

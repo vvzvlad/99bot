@@ -4,7 +4,6 @@
 import logging
 import os
 import asyncio
-import signal
 
 from pyrogram import Client
 from pyrogram.handlers import DisconnectHandler
@@ -61,16 +60,15 @@ class TelegramClient:
             raise
 
     def _restart_app(self):
-        """Restarts the application by sending SIGTERM to the process"""
-        logger.warning("connection_handler: restarting application by sending SIGTERM")
-        try:
-            # Use SIGTERM for proper Docker container restart
-            logger.critical("connection_handler: sending SIGTERM signal")
-            os.kill(os.getpid(), signal.SIGTERM)
-        except Exception as e:
-            logger.error(f"connection_handler: error during restart: {str(e)}")
-            # Emergency termination
-            os._exit(1)
+        """Exits the process so that Docker's restart policy starts a fresh one.
+
+        The bot runs as PID 1 of its container with no init in front of it, and the kernel
+        drops any signal sent to PID 1 from inside the container unless the process has a
+        handler for it. A SIGTERM sent to itself was therefore silently ignored: the bot kept
+        running on a session that no longer received updates. os._exit cannot be ignored.
+        """
+        logger.critical("connection_handler: exiting so that Docker restarts the bot")
+        os._exit(1)
 
     async def stop(self):
         if self.client.is_connected:
