@@ -63,8 +63,15 @@ class TextIndex:
         self._put(msg_id, text)
 
     def search(self, query):
-        """Ids of the messages whose text holds every word of the query, newest first."""
+        """Ids of the messages whose text holds the query as a phrase, newest first.
+
+        The words of the query follow one another in the text, each one the start of a word there: "у нас было"
+        finds "у нас было 9 планет", "планет" finds "планеты", "бля" does not find "рублях".
+        """
         words = fold(query).split()
         if not words:
             return []
-        return sorted((i for i, t in self._folded.items() if all(w in t for w in words)), reverse=True)
+        phrase = re.compile(r"(?:^| )" + r"\S* ".join(map(re.escape, words)))
+        # the substring test is a cheap pre-filter: the phrase is matched only where every word occurs
+        return sorted((i for i, t in self._folded.items() if all(w in t for w in words) and phrase.search(t)),
+                      reverse=True)
