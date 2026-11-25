@@ -206,7 +206,7 @@ SYMBOLS = [
     ("uvloop", "EventLoopPolicy"),
     ("pyrogram", "Client"),
     ("pyrogram", "filters"),
-    # The eleven filters the handlers combine with & and |. They are attributes of a
+    # The twelve filters the handlers combine with & and |. They are attributes of a
     # module, so a rename is an AttributeError inside a decorator at registration time —
     # invisible to anything that only imports.
     ("pyrogram.filters", "command"),
@@ -217,6 +217,7 @@ SYMBOLS = [
     ("pyrogram.filters", "service"),
     ("pyrogram.filters", "chat"),
     ("pyrogram.filters", "photo"),
+    ("pyrogram.filters", "sticker"),
     ("pyrogram.filters", "caption"),
     ("pyrogram.filters", "me"),
     ("pyrogram.filters", "forwarded"),
@@ -255,6 +256,18 @@ SYMBOLS = [
     ("PIL.Image", "Image.draft"),
     ("PIL.Image", "Image.convert"),
     ("PIL.Image", "Image.thumbnail"),
+    # The OCR of the text on pictures (image_text): the engine and the enums that choose its models.
+    ("rapidocr", "RapidOCR"),
+    ("rapidocr", "EngineType.ONNXRUNTIME"),
+    ("rapidocr", "OCRVersion.PPOCRV6"),
+    ("rapidocr", "OCRVersion.PPOCRV5"),
+    ("rapidocr", "ModelType.TINY"),
+    ("rapidocr", "ModelType.MOBILE"),
+    ("rapidocr", "LangRec.ESLAV"),
+    # The first frame of a video sticker, with its transparency (image_text._first_frame).
+    ("av", "open"),
+    ("av", "CodecContext.create"),
+    ("av", "VideoFrame.to_ndarray"),
     # The repost detector. torch and torchvision are imported lazily by the bot, at startup
     # rather than at import, so these rows are the only thing that loads them here.
     ("pdqhash", "compute"),

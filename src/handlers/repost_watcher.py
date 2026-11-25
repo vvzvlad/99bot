@@ -7,8 +7,9 @@ Replies "это уже было" (or another phrase at random) to a photo in the
 (repost_detector tells a re-post of the same picture from a derivative meme),
 or a jab at the poster's memory when every original is their own picture, either one saying how many days ago the originals were posted,
 and takes a picture (a sticker sent as a photo) and its reposts out of the watch on /ex.
-It also reads the text on every picture (image_text, Tesseract) and answers /find <text> with links to the pictures
-that carry it.
+It also reads the text on every picture (image_text, RapidOCR) and on every static and video sticker sent to the chat,
+and answers /find <text> with links to the pictures and stickers that carry it. A sticker is only read for /find: it is
+no repost.
 """
 
 import asyncio
@@ -16,6 +17,7 @@ import json
 import logging
 import os
 import random
+import tempfile
 import time
 from datetime import datetime
 import numpy as np
@@ -55,9 +57,11 @@ ALZHEIMER = (
     "память как у золотой рыбки: ты сам это уже постил",
 )
 
-# serialises the startup, every photo, /ex and reading the text on photos, so rows are appended in message order
-# and Tesseract never runs alongside stage 2
+# serialises the startup, every photo and /ex, so rows are appended in message order
 _lock = asyncio.Lock()
+# one OCR at a time, for the engine is shared; kept apart from _lock, so that neither "это уже было" nor the next photo
+# waits for the text on a picture or a sticker to be read
+_ocr_lock = asyncio.Lock()
 # references to the running tasks, so they are not garbage-collected mid-flight
 _tasks = set()
 _index = None
@@ -111,11 +115,29 @@ def _ago(then, now):
 async def _index_text(msg_id, file):
     """OCR one picture into the text index. A failure is logged and leaves the picture unread, nothing else."""
     try:
-        text = await asyncio.to_thread(read_text, os.path.join(PHOTOS_DIR, file))
+        async with _ocr_lock:
+            text = await asyncio.to_thread(read_text, os.path.join(PHOTOS_DIR, file))
         # added here, not in the thread: /find reads the index from the event loop
         _texts.add(msg_id, text)
     except Exception as e:
         logger.error(f"Error reading the text on photo {msg_id}: {str(e)}", exc_info=True)
+
+
+async def _index_sticker_text(client: Client, message: Message):
+    """OCR one static or video sticker into the text index. A failure is logged, nothing else."""
+    try:
+        if _texts is None:
+            return
+        # the file is kept nowhere: stickers are not in the repost index
+        with tempfile.TemporaryDirectory() as tmp:
+            suffix = ".webm" if message.sticker.is_video else ".webp"
+            path = await client.download_media(message, file_name=os.path.join(tmp, f"{message.id}{suffix}"))
+            async with _ocr_lock:
+                text = await asyncio.to_thread(read_text, path)
+        # added here, not in the thread: /find reads the index from the event loop
+        _texts.add(message.id, text)
+    except Exception as e:
+        logger.error(f"Error reading the text on sticker {message.id}: {str(e)}", exc_info=True)
 
 
 async def _read_missing_texts():
@@ -124,9 +146,7 @@ async def _read_missing_texts():
     missing = [(int(i), f.decode()) for i, f in zip(_index.ids, _index.files) if int(i) not in _texts.ids]
     logger.info(f"Reading the text on {len(missing)} photos")
     for msg_id, file in missing:
-        # the lock per photo, not for the whole run: the bot keeps answering photos meanwhile
-        async with _lock:
-            await _index_text(msg_id, file)
+        await _index_text(msg_id, file)
     logger.info(f"Reading the text on {len(missing)} photos done")
 
 
@@ -184,16 +204,15 @@ async def _startup(client: Client):
                 except Exception as e:
                     logger.error(f"Error in repost backfill for message {message.id}: {str(e)}", exc_info=True)
             logger.info(f"Repost backfill done: {count} photos, max id {_index.max_id}")
-            # waits for this lock to be released
             _spawn(_read_missing_texts())
         except Exception as e:
             logger.error(f"Error in repost watcher startup: {str(e)}", exc_info=True)
 
 
 async def _on_photo(client: Client, message: Message):
+    # (message id, file) of the photos indexed here, their text read after the answer
+    added = []
     async with _lock:
-        # (message id, file) of the photos indexed here, their text read after the answer
-        added = []
         try:
             if message.id <= _index.max_id:
                 return
@@ -235,10 +254,9 @@ async def _on_photo(client: Client, message: Message):
                                             link_preview_options=LinkPreviewOptions(is_disabled=True))
         except Exception as e:
             logger.error(f"Error in repost watcher for message {message.id}: {str(e)}", exc_info=True)
-        finally:
-            # after the answer: "это уже было" must not wait for Tesseract
-            for msg_id, file in added:
-                await _index_text(msg_id, file)
+    # after the answer and outside _lock: neither "это уже было" nor the next photo waits for the OCR
+    for msg_id, file in added:
+        await _index_text(msg_id, file)
 
 
 async def _on_ex(message: Message):
@@ -266,7 +284,7 @@ async def _on_ex(message: Message):
 
 
 async def _on_find(message: Message):
-    """/find <text>: links to the newest pictures that carry the text."""
+    """/find <text>: links to the newest pictures and stickers that carry the text."""
     try:
         if _texts is None:
             return
@@ -292,11 +310,18 @@ def start(client: Client):
 
 
 def register_handler(client: Client, group: int = 0):
-    """Register the photo, /ex and /find handlers for the chat"""
+    """Register the photo, sticker, /ex and /find handlers for the chat"""
     @client.on_message(filters.chat(CHAT_ID) & filters.photo, group=group)
     async def repost_wrapper(client: Client, message: Message):
         # stage 2 may take minutes, so it must not hold a dispatcher worker
         _spawn(_on_photo(client, message))
+        await message.continue_propagation()
+
+    @client.on_message(filters.chat(CHAT_ID) & filters.sticker, group=group)
+    async def sticker_wrapper(client: Client, message: Message):
+        # an animated (.tgs) sticker has no picture to read; the download and the OCR must not hold a dispatcher worker
+        if not message.sticker.is_animated:
+            _spawn(_index_sticker_text(client, message))
         await message.continue_propagation()
 
     # text only: filters.command also matches a media caption, and a captioned photo is not a command

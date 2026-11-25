@@ -1,25 +1,62 @@
-"""Text on pictures: OCR with Tesseract and a searchable index of what it read.
+"""Text on pictures: OCR with RapidOCR and a searchable index of what it read.
 
-TextIndex keeps one JSON line per photo message ({"id": ..., "text": ...}) in a file. Nothing here imports the bot,
+TextIndex keeps one JSON line per picture message ({"id": ..., "text": ...}) in a file. Nothing here imports the bot,
 so the module runs standalone too (tools/build_image_texts.py uses it).
 """
 import json
 import os
 import re
-import subprocess
 
-LANGS = "rus+eng"
-# Tesseract with rus+eng gives the capitals of a Latin line as their Russian twins (МЕ, АТ, ВЕ) and back;
+import av
+from rapidocr import EngineType, LangRec, ModelType, OCRVersion, RapidOCR
+
+# The OCR can give the capitals of a Latin line as their Russian twins (МЕ, АТ, ВЕ) and back;
 # after casefold these are the lowercase pairs of those capitals
 TWINS = str.maketrans("abcehkmoptxy", "авсенкмортху")
 
+# built on the first read, like repost_detector's model; the models are in the image, none is downloaded at runtime
+_engine = None
+
+
+def build_engine():
+    """The RapidOCR engine on one CPU thread (several runs go in parallel, so its own threading only gets in the way):
+    detection PP-OCRv6 tiny, recognition PP-OCRv5 eslav mobile, Russian and English in one model."""
+    return RapidOCR(params={
+        "Global.log_level": "error",
+        "EngineConfig.onnxruntime.intra_op_num_threads": 1,
+        "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+        "Det.engine_type": EngineType.ONNXRUNTIME, "Det.ocr_version": OCRVersion.PPOCRV6, "Det.model_type": ModelType.TINY,
+        "Rec.engine_type": EngineType.ONNXRUNTIME, "Rec.lang_type": LangRec.ESLAV,
+        "Rec.model_type": ModelType.MOBILE, "Rec.ocr_version": OCRVersion.PPOCRV5,
+    })
+
 
 def read_text(path):
-    """Text Tesseract reads on the picture, whitespace collapsed to single spaces; '' when there is none."""
-    # one thread per process: Tesseract's own threading only slows down many parallel runs
-    out = subprocess.run(["tesseract", path, "-", "-l", LANGS], check=True, capture_output=True, text=True,
-                         env={**os.environ, "OMP_THREAD_LIMIT": "1"}).stdout
-    return " ".join(out.split())
+    """Text RapidOCR reads on the picture, whitespace collapsed to single spaces; '' when there is none.
+
+    A .webm (a video sticker) is read as its first frame.
+    """
+    global _engine
+    if _engine is None:
+        _engine = build_engine()
+    result = _engine(_first_frame(path) if path.endswith(".webm") else path)
+    return " ".join(" ".join(result.txts or ()).split())
+
+
+def _first_frame(path):
+    """The first frame of a VP9 video sticker as an RGBA array.
+
+    Decoded by libvpx, not by FFmpeg's own VP9 decoder, which drops the alpha channel: the transparent background then
+    comes out black and dark text on it vanishes. Given the alpha, RapidOCR lays the picture on white or black, whichever
+    contrasts with it, as it does for a transparent .webp sticker.
+    """
+    decoder = av.CodecContext.create("libvpx-vp9", "r")
+    with av.open(path) as container:
+        for packet in container.demux(container.streams.video[0]):
+            # the last, empty packet of the demuxer flushes the decoder
+            for frame in decoder.decode(packet):
+                return frame.to_ndarray(format="rgba")
+    raise ValueError(f"no frame in {path}")
 
 
 def fold(text):
@@ -31,7 +68,7 @@ def fold(text):
 
 
 class TextIndex:
-    """Texts read off photos so far: JSON lines in path, in the order they were added."""
+    """Texts read off pictures so far: JSON lines in path, in the order they were added."""
 
     def __init__(self, path):
         self.path = path
@@ -65,13 +102,16 @@ class TextIndex:
     def search(self, query):
         """Ids of the messages whose text holds the query as a phrase, newest first.
 
-        The words of the query follow one another in the text, each one the start of a word there: "у нас было"
-        finds "у нас было 9 планет", "планет" finds "планеты", "бля" does not find "рублях".
+        The words of the query follow one another in the text, the first one the start of a word there, each next one
+        the start of a word or glued to the end of the previous one (the OCR often glues words), except after a
+        one-letter word, where gluing would make "с ним" find "снимок": "у нас было" finds "у нас было 9 планет",
+        "планет" finds "планеты", "бля че я несу" finds "блячея несу", "бля" does not find "рублях".
         """
         words = fold(query).split()
         if not words:
             return []
-        phrase = re.compile(r"(?:^| )" + r"\S* ".join(map(re.escape, words)))
+        phrase = re.compile(r"(?:^| )" + "".join(re.escape(w) + (r"\S* " if len(w) == 1 else r"(?:\S* )?")
+                                                 for w in words[:-1]) + re.escape(words[-1]))
         # the substring test is a cheap pre-filter: the phrase is matched only where every word occurs
         return sorted((i for i, t in self._folded.items() if all(w in t for w in words) and phrase.search(t)),
                       reverse=True)

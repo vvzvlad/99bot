@@ -1,4 +1,4 @@
-"""Read the text on every photo of the repost index (Tesseract) and write the bot's text index (data/repost/texts.jsonl).
+"""Read the text on every photo of the repost index (RapidOCR) and write the bot's text index (data/repost/texts.jsonl).
 
 usage: build_image_texts.py photos_dir index.bin texts.jsonl [workers]
 
@@ -6,10 +6,13 @@ Messages that already have a line in texts.jsonl are skipped, so a rerun resumes
 again is one file for several messages: it is read once and every message gets a line. workers defaults to the CPU count.
 """
 import os
-import subprocess
 import sys
 from multiprocessing import Pool
 
+# one thread per worker: OpenBLAS (numpy) and OpenCV each start a pool the size of the machine in every worker,
+# and dozens of workers with dozens of threads each spend the CPU on the pools instead of on reading
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
@@ -20,11 +23,11 @@ PROGRESS_EVERY = 1000
 
 
 def read_file(path):
-    """(path, text, None), or (path, None, error) when Tesseract fails on this one file."""
+    """(path, text, None), or (path, None, error) when the OCR fails on this one file."""
     try:
         return path, read_text(path), None
-    except subprocess.CalledProcessError as e:
-        return path, None, f"exit {e.returncode}: {e.stderr.strip()}"
+    except Exception as e:
+        return path, None, str(e)
 
 
 if __name__ == "__main__":
@@ -39,7 +42,7 @@ if __name__ == "__main__":
     print(f"{len(rows)} rows, {sum(map(len, ids_by_file.values()))} messages without text, "
           f"{len(ids_by_file)} files to read, {workers} workers")
     done = failed = 0
-    with Pool(workers) as pool:
+    with Pool(workers, initializer=cv2.setNumThreads, initargs=(1,)) as pool:
         for path, text, error in pool.imap_unordered(read_file, ids_by_file):
             done += 1
             if error:

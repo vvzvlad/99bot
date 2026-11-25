@@ -5,6 +5,9 @@ python-dotenv
 Pillow>=10.0.0
 numpy
 opencv-python-headless
+rapidocr
+onnxruntime
+av
 pdqhash
 torch
 torchvision

@@ -17,11 +17,18 @@ RUN pip install --no-cache-dir torch torchvision --index-url https://download.py
 # runner's connection to that CDN stalls after the first few KB
 ADD https://gitea.vvzvlad.xyz/api/packages/projects/generic/sscd_disc_mixup/1.0/sscd_disc_mixup.torchscript.pt /app/models/sscd_disc_mixup.torchscript.pt
 COPY requirements.txt .
-# pdqhash publishes no wheels, so it is compiled here; the compiler goes away in the same layer.
-# tesseract-ocr reads the text on pictures (/find) and stays
-RUN apt-get update && apt-get install -y --no-install-recommends g++ tesseract-ocr tesseract-ocr-rus \
+# pdqhash publishes no wheels, so it is compiled here; the compiler goes away in the same layer
+RUN apt-get update && apt-get install -y --no-install-recommends g++ \
     && pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y --auto-remove g++ && rm -rf /var/lib/apt/lists/*
+# the OCR models (/find) are downloaded now, so production downloads nothing at runtime. RapidOCR fetches them on
+# its first read, not when the engine is built, so a drawn caption is read here; reading nothing fails the build
+COPY src/image_text.py /tmp/image_text.py
+RUN python -c "import sys, cv2, numpy as np; sys.path.insert(0, '/tmp'); import image_text; \
+im = np.full((120, 600, 3), 255, np.uint8); \
+cv2.putText(im, 'CEO OF SEX', (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 5); cv2.imwrite('/tmp/ocr.png', im); \
+sys.exit(0 if image_text.read_text('/tmp/ocr.png') else 'the OCR read nothing on a drawn caption')" \
+    && rm -r /tmp/image_text.py /tmp/ocr.png /tmp/__pycache__
 COPY src/ src/
 
 CMD ["python", "src/main.py"]
