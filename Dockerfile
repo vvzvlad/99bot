@@ -17,8 +17,9 @@ RUN pip install --no-cache-dir torch torchvision --index-url https://download.py
 # runner's connection to that CDN stalls after the first few KB
 ADD https://gitea.vvzvlad.xyz/api/packages/projects/generic/sscd_disc_mixup/1.0/sscd_disc_mixup.torchscript.pt /app/models/sscd_disc_mixup.torchscript.pt
 COPY requirements.txt .
-# pdqhash publishes no wheels, so it is compiled here; the compiler goes away in the same layer
-RUN apt-get update && apt-get install -y --no-install-recommends g++ \
+# pdqhash publishes no wheels, so it is compiled here; the compiler goes away in the same layer.
+# tesseract-ocr reads the text on pictures (/find) and stays
+RUN apt-get update && apt-get install -y --no-install-recommends g++ tesseract-ocr tesseract-ocr-rus \
     && pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y --auto-remove g++ && rm -rf /var/lib/apt/lists/*
 COPY src/ src/

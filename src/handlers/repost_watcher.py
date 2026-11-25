@@ -7,6 +7,8 @@ Replies "это уже было" (or another phrase at random) to a photo in the
 (repost_detector tells a re-post of the same picture from a derivative meme),
 or a jab at the poster's memory when every original is their own picture, either one saying how many days ago the originals were posted,
 and takes a picture (a sticker sent as a photo) and its reposts out of the watch on /ex.
+It also reads the text on every picture (image_text, Tesseract) and answers /find <text> with links to the pictures
+that carry it.
 """
 
 import asyncio
@@ -22,6 +24,7 @@ from pyrogram.types import Message, LinkPreviewOptions
 from pyrogram.enums import ParseMode
 
 from config import get_app_timezone, get_settings, pluralize_days
+from image_text import TextIndex, read_text
 from repost_detector import ROW, RepostIndex, features, load_model
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,8 @@ DATA_DIR = os.path.join(os.path.abspath(get_settings()["session_path"]), "repost
 PHOTOS_DIR = os.path.join(DATA_DIR, "photos")
 INDEX_PATH = os.path.join(DATA_DIR, "index.bin")
 EXCLUDED_PATH = os.path.join(DATA_DIR, "excluded.json")
+TEXTS_PATH = os.path.join(DATA_DIR, "texts.jsonl")
+FIND_MAX = 20  # /find lists at most this many pictures, the newest
 # the first line of the reply to a repost of someone else's picture, one at random
 REPOST = (
     "это уже было",
@@ -50,13 +55,16 @@ ALZHEIMER = (
     "память как у золотой рыбки: ты сам это уже постил",
 )
 
-# serialises the startup, every photo and /ex, so rows are appended in message order
+# serialises the startup, every photo, /ex and reading the text on photos, so rows are appended in message order
+# and Tesseract never runs alongside stage 2
 _lock = asyncio.Lock()
 # references to the running tasks, so they are not garbage-collected mid-flight
 _tasks = set()
 _index = None
 # message ids of the pictures /ex took out (stickers sent as photos): neither they nor their reposts are reposts
 _excluded = None
+# the text read off every picture; /find reads it from the event loop, so it is only ever changed there
+_texts = None
 
 
 def _spawn(coro):
@@ -72,8 +80,9 @@ def _open():
     if os.path.exists(EXCLUDED_PATH):
         with open(EXCLUDED_PATH, encoding="utf-8") as f:
             excluded = set(json.load(f))
+    texts = TextIndex(TEXTS_PATH)
     load_model()
-    return index, excluded
+    return index, excluded, texts
 
 
 def _save_excluded():
@@ -99,13 +108,36 @@ def _ago(then, now):
     return "сегодня" if days == 0 else f"{days} {pluralize_days(days)} назад"
 
 
+async def _index_text(msg_id, file):
+    """OCR one picture into the text index. A failure is logged and leaves the picture unread, nothing else."""
+    try:
+        text = await asyncio.to_thread(read_text, os.path.join(PHOTOS_DIR, file))
+        # added here, not in the thread: /find reads the index from the event loop
+        _texts.add(msg_id, text)
+    except Exception as e:
+        logger.error(f"Error reading the text on photo {msg_id}: {str(e)}", exc_info=True)
+
+
+async def _read_missing_texts():
+    """Read the text on every indexed photo that has none yet: the ones taken in while the bot was down, and those
+    tools/build_image_texts.py did not see."""
+    missing = [(int(i), f.decode()) for i, f in zip(_index.ids, _index.files) if int(i) not in _texts.ids]
+    logger.info(f"Reading the text on {len(missing)} photos")
+    for msg_id, file in missing:
+        # the lock per photo, not for the whole run: the bot keeps answering photos meanwhile
+        async with _lock:
+            await _index_text(msg_id, file)
+    logger.info(f"Reading the text on {len(missing)} photos done")
+
+
 def _check(path, msg_id, author, date, reply_to):
     pdq, sscd = features(path)
     return pdq, sscd, _index.first_repost(path, msg_id, author, date, pdq, sscd, reply_to)
 
 
 async def _add_photo(client: Client, message: Message, check: bool):
-    """Download one photo message and append it to the index; with check, return the original it re-posts, or None.
+    """Download one photo message and append it to the index; return its file name and, with check, the original
+    it re-posts, or None.
 
     A photo that re-posts a picture /ex took out is no repost.
     """
@@ -122,17 +154,17 @@ async def _add_photo(client: Client, message: Message, check: bool):
         pdq, sscd = await asyncio.to_thread(features, path)
         old_id = None
     _index.append(np.array([(message.id, author, date, pdq, sscd, file)], ROW))
-    return None if old_id in _excluded else old_id
+    return file, (None if old_id in _excluded else old_id)
 
 
 async def _startup(client: Client):
     """Load the index and the model, then take in what was posted while the bot was down."""
-    global _index, _excluded
+    global _index, _excluded, _texts
     # the handlers are registered by now: what is posted from here on reaches them and gets its answer
     started = time.time()
     async with _lock:
         try:
-            _index, _excluded = await asyncio.to_thread(_open)
+            _index, _excluded, _texts = await asyncio.to_thread(_open)
             logger.info(f"Repost index loaded: {len(_index.ids)} photos, max id {_index.max_id}")
             if not len(_index.ids):
                 logger.info("Repost index is empty, backfill skipped")
@@ -152,12 +184,16 @@ async def _startup(client: Client):
                 except Exception as e:
                     logger.error(f"Error in repost backfill for message {message.id}: {str(e)}", exc_info=True)
             logger.info(f"Repost backfill done: {count} photos, max id {_index.max_id}")
+            # waits for this lock to be released
+            _spawn(_read_missing_texts())
         except Exception as e:
             logger.error(f"Error in repost watcher startup: {str(e)}", exc_info=True)
 
 
 async def _on_photo(client: Client, message: Message):
     async with _lock:
+        # (message id, file) of the photos indexed here, their text read after the answer
+        added = []
         try:
             if message.id <= _index.max_id:
                 return
@@ -170,10 +206,11 @@ async def _on_photo(client: Client, message: Message):
             hits = []
             for m in album:
                 try:
-                    old_id = await _add_photo(client, m, check=True)
+                    file, old_id = await _add_photo(client, m, check=True)
                 except Exception as e:
                     logger.error(f"Error in repost watcher for message {m.id}: {str(e)}", exc_info=True)
                     continue
+                added.append((m.id, file))
                 if old_id is not None:
                     hits.append((m, old_id))
             if hits:
@@ -198,6 +235,10 @@ async def _on_photo(client: Client, message: Message):
                                             link_preview_options=LinkPreviewOptions(is_disabled=True))
         except Exception as e:
             logger.error(f"Error in repost watcher for message {message.id}: {str(e)}", exc_info=True)
+        finally:
+            # after the answer: "это уже было" must not wait for Tesseract
+            for msg_id, file in added:
+                await _index_text(msg_id, file)
 
 
 async def _on_ex(message: Message):
@@ -224,13 +265,34 @@ async def _on_ex(message: Message):
             logger.error(f"Error in repost exclusion for message {message.id}: {str(e)}", exc_info=True)
 
 
+async def _on_find(message: Message):
+    """/find <text>: links to the newest pictures that carry the text."""
+    try:
+        if _texts is None:
+            return
+        query = " ".join(message.command[1:])
+        if not query:
+            await message.reply_text("напиши /find и текст с картинки")
+            return
+        found = _texts.search(query)
+        if not found:
+            await message.reply_text("не нашёл")
+            return
+        links = ", ".join(f"[{n}]({LINK.format(i)})" for n, i in enumerate(found[:FIND_MAX], 1))
+        head = f"нашёл {len(found)}" if len(found) <= FIND_MAX else f"нашёл {len(found)}, последние {FIND_MAX}"
+        await message.reply_text(f"{head}: {links}", parse_mode=ParseMode.MARKDOWN,
+                                 link_preview_options=LinkPreviewOptions(is_disabled=True))
+    except Exception as e:
+        logger.error(f"Error in picture text search for message {message.id}: {str(e)}", exc_info=True)
+
+
 def start(client: Client):
     """Schedule the startup; called once after all handlers are registered."""
     _spawn(_startup(client))
 
 
 def register_handler(client: Client, group: int = 0):
-    """Register the photo and /ex handlers for the chat"""
+    """Register the photo, /ex and /find handlers for the chat"""
     @client.on_message(filters.chat(CHAT_ID) & filters.photo, group=group)
     async def repost_wrapper(client: Client, message: Message):
         # stage 2 may take minutes, so it must not hold a dispatcher worker
@@ -242,6 +304,12 @@ def register_handler(client: Client, group: int = 0):
     async def ex_wrapper(client: Client, message: Message):
         # waits for the lock, which a photo's stage 2 may hold for minutes
         _spawn(_on_ex(message))
+        await message.continue_propagation()
+
+    @client.on_message(filters.command("find") & filters.text & filters.chat(CHAT_ID), group=group)
+    async def find_wrapper(client: Client, message: Message):
+        # no lock: stage 2 of a photo may hold it for minutes, and the search only reads
+        await _on_find(message)
         await message.continue_propagation()
 
     logger.info("Repost watcher handler registered")
