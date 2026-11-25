@@ -21,10 +21,16 @@ COPY requirements.txt .
 RUN apt-get update && apt-get install -y --no-install-recommends g++ \
     && pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y --auto-remove g++ && rm -rf /var/lib/apt/lists/*
-# the OCR models (/find) are downloaded now, so production downloads nothing at runtime. RapidOCR fetches them on
-# its first read, not when the engine is built, so a drawn caption is read here; reading nothing fails the build
+# the OCR models (/find), mirrored from modelscope.cn, which the CI runner times out on: RapidOCR finds them next to
+# itself by name and checksum and downloads nothing
+ADD https://gitea.vvzvlad.xyz/api/packages/projects/generic/rapidocr_models/3.10.0/PP-OCRv6_det_tiny.onnx \
+    https://gitea.vvzvlad.xyz/api/packages/projects/generic/rapidocr_models/3.10.0/eslav_PP-OCRv5_rec_mobile.onnx \
+    /usr/local/lib/python3.11/site-packages/rapidocr/models/
+# a drawn caption is read here without network: RapidOCR fetches a model it lacks on its first read, not when the
+# engine is built, so a model missing above fails the build instead of being fetched in production; so does reading
+# nothing
 COPY src/image_text.py /tmp/image_text.py
-RUN python -c "import sys, cv2, numpy as np; sys.path.insert(0, '/tmp'); import image_text; \
+RUN --network=none python -c "import sys, cv2, numpy as np; sys.path.insert(0, '/tmp'); import image_text; \
 im = np.full((120, 600, 3), 255, np.uint8); \
 cv2.putText(im, 'CEO OF SEX', (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 5); cv2.imwrite('/tmp/ocr.png', im); \
 sys.exit(0 if image_text.read_text('/tmp/ocr.png') else 'the OCR read nothing on a drawn caption')" \

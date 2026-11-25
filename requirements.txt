@@ -5,7 +5,8 @@ python-dotenv
 Pillow>=10.0.0
 numpy
 opencv-python-headless
-rapidocr
+# the version whose OCR models the Dockerfile mirrors
+rapidocr==3.10.0
 onnxruntime
 av
 pdqhash
