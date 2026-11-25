@@ -18,9 +18,10 @@ TWINS = str.maketrans("abcehkmoptxy", "авсенкмортху")
 _engine = None
 
 
-def build_engine():
+def build_engine(extra=None):
     """The RapidOCR engine on one CPU thread (several runs go in parallel, so its own threading only gets in the way):
-    detection PP-OCRv6 tiny, recognition PP-OCRv5 eslav mobile, Russian and English in one model."""
+    detection PP-OCRv6 tiny, recognition PP-OCRv5 eslav mobile, Russian and English in one model. extra: more RapidOCR
+    params on top of these."""
     return RapidOCR(params={
         "Global.log_level": "error",
         "EngineConfig.onnxruntime.intra_op_num_threads": 1,
@@ -28,18 +29,21 @@ def build_engine():
         "Det.engine_type": EngineType.ONNXRUNTIME, "Det.ocr_version": OCRVersion.PPOCRV6, "Det.model_type": ModelType.TINY,
         "Rec.engine_type": EngineType.ONNXRUNTIME, "Rec.lang_type": LangRec.ESLAV,
         "Rec.model_type": ModelType.MOBILE, "Rec.ocr_version": OCRVersion.PPOCRV5,
+        **(extra or {}),
     })
 
 
-def read_text(path):
+def read_text(path, engine=None):
     """Text RapidOCR reads on the picture, whitespace collapsed to single spaces; '' when there is none.
 
-    A .webm (a video sticker) is read as its first frame.
+    A .webm (a video sticker) is read as its first frame. engine: one from build_engine, by default the module's own.
     """
     global _engine
-    if _engine is None:
-        _engine = build_engine()
-    result = _engine(_first_frame(path) if path.endswith(".webm") else path)
+    if engine is None:
+        if _engine is None:
+            _engine = build_engine()
+        engine = _engine
+    result = engine(_first_frame(path) if path.endswith(".webm") else path)
     return " ".join(" ".join(result.txts or ()).split())
 
 
