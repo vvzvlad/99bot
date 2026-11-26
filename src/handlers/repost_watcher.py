@@ -131,7 +131,10 @@ async def _index_sticker_text(client: Client, message: Message):
         # the file is kept nowhere: stickers are not in the repost index
         with tempfile.TemporaryDirectory() as tmp:
             suffix = ".webm" if message.sticker.is_video else ".webp"
-            path = await client.download_media(message, file_name=os.path.join(tmp, f"{message.id}{suffix}"))
+            # by file_id, not by the message: given the message, Kurigram reads the sticker's file_name, and on a
+            # sticker that has none it fails with TypeError in ntpath.basename(None)
+            path = await client.download_media(message.sticker.file_id,
+                                               file_name=os.path.join(tmp, f"{message.id}{suffix}"))
             async with _ocr_lock:
                 text = await asyncio.to_thread(read_text, path)
         # added here, not in the thread: /find reads the index from the event loop
